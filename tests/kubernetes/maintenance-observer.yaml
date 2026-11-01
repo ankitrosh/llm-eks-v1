@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qwen3-gpu-observer
+  namespace: llm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: qwen3-gpu-observer
+  namespace: llm
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["qwen3-0", "qwen3-1"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["qwen3-gpu-diagnostics"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qwen3-gpu-observer
+  namespace: llm
+subjects:
+  - kind: ServiceAccount
+    name: qwen3-gpu-observer
+    namespace: llm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: qwen3-gpu-observer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-gpu-observer
+  namespace: llm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qwen3-gpu-observer
+  template:
+    metadata:
+      labels:
+        app: qwen3-gpu-observer
+    spec:
+      serviceAccountName: qwen3-gpu-observer
+      nodeSelector:
+        pool: cpu
+      containers:
+        - name: observer
+          image: python:3.12-slim
+          command:
+            - python
+            - -u
+            - /app/observer.py
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 150m
+              memory: 128Mi
+          volumeMounts:
+            - name: source
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: source
+          configMap:
+            name: qwen3-gpu-observer-source

@@ -1,0 +1,42 @@
+{
+  "name": "qwen3-v1-image-build",
+  "description": "Qwen3-14B NCCL pipeline V1 image rebuild",
+  "source": {
+    "type": "S3",
+    "location": "llm-qwen3-buildsrc-657173565477-us-east-2/source/qwen3-codebuild-source.zip",
+    "buildspec": "buildspec.yml"
+  },
+  "artifacts": {
+    "type": "NO_ARTIFACTS"
+  },
+  "environment": {
+    "type": "LINUX_CONTAINER",
+    "image": "aws/codebuild/standard:8.0",
+    "computeType": "BUILD_GENERAL1_MEDIUM",
+    "privilegedMode": true,
+    "imagePullCredentialsType": "CODEBUILD",
+    "environmentVariables": [
+      {
+        "name": "PUBLISH_TO_ECR",
+        "value": "false",
+        "type": "PLAINTEXT"
+      },
+      {
+        "name": "IMAGE_TAG",
+        "value": "v1-rebuild-test",
+        "type": "PLAINTEXT"
+      }
+    ]
+  },
+  "serviceRole": "arn:aws:iam::657173565477:role/llm-qwen3-codebuild-role-v1",
+  "timeoutInMinutes": 90,
+  "cache": {
+    "type": "NO_CACHE"
+  },
+  "logsConfig": {
+    "cloudWatchLogs": {
+      "status": "ENABLED",
+      "groupName": "/aws/codebuild/qwen3-v1-image-build"
+    }
+  }
+}

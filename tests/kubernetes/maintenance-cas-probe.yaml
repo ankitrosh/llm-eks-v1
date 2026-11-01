@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qwen3-maintenance-cas-test
+  namespace: llm
+data:
+  state: '{"value":0}'
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qwen3-maintenance-cas-probe
+  namespace: llm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: qwen3-maintenance-cas-probe
+  namespace: llm
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - qwen3-maintenance-cas-test
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qwen3-maintenance-cas-probe
+  namespace: llm
+subjects:
+  - kind: ServiceAccount
+    name: qwen3-maintenance-cas-probe
+    namespace: llm
+roleRef:
+  kind: Role
+  name: qwen3-maintenance-cas-probe
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qwen3-maintenance-cas-probe
+  namespace: llm
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      serviceAccountName: qwen3-maintenance-cas-probe
+      nodeSelector:
+        pool: cpu
+      containers:
+        - name: probe
+          image: python:3.12-slim
+          command:
+            - python
+            - -u
+            - /app/probe.py
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 150m
+              memory: 128Mi
+          volumeMounts:
+            - name: source
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: source
+          configMap:
+            name: qwen3-maintenance-cas-source

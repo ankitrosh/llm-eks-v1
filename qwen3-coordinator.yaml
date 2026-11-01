@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-coordinator
+  namespace: llm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qwen3-coordinator
+  template:
+    metadata:
+      labels:
+        app: qwen3-coordinator
+    spec:
+      nodeSelector:
+        pool: cpu
+
+      automountServiceAccountToken: false
+
+      containers:
+        - name: coordinator
+          image: python:3.12-slim
+          command: ["python", "-u", "/app/coordinator.py"]
+
+          env:
+            - name: PORT
+              value: "8080"
+            - name: RANK_URLS
+              value: "http://qwen3-0.qwen3-headless.llm.svc.cluster.local:8000,http://qwen3-1.qwen3-headless.llm.svc.cluster.local:8000"
+            - name: UPSTREAM_URL
+              value: "http://qwen3-api.llm.svc.cluster.local:8000"
+            - name: REQUEST_TIMEOUT
+              value: "300"
+
+          ports:
+            - containerPort: 8080
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            periodSeconds: 5
+            timeoutSeconds: 6
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+
+          volumeMounts:
+            - name: source
+              mountPath: /app
+              readOnly: true
+
+      volumes:
+        - name: source
+          configMap:
+            name: qwen3-coordinator-source
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-coordinator
+  namespace: llm
+spec:
+  type: ClusterIP
+  selector:
+    app: qwen3-coordinator
+  ports:
+    - port: 8080
+      targetPort: 8080

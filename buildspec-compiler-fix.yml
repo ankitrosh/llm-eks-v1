@@ -1,0 +1,36 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        aws ecr get-login-password --region us-east-2 |
+          docker login --username AWS --password-stdin \
+          657173565477.dkr.ecr.us-east-2.amazonaws.com
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+
+        ECR_URI="657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline"
+        IMAGE_TAG="v1-rebuild-gcc-20261101-2"
+        IMAGE="$ECR_URI:$IMAGE_TAG"
+
+        echo "Building $IMAGE"
+        grep -n 'build-essential' docker/Dockerfile
+
+        docker build -f docker/Dockerfile -t "$IMAGE" .
+
+        echo "Checking compiler and Python environment"
+        docker run --rm --entrypoint /bin/bash "$IMAGE" -c \
+          '/usr/bin/gcc --version && /opt/llm-venv/bin/python -c "import torch, triton; print(torch.__version__, triton.__version__)"'
+
+        echo "Smoke test passed; pushing image"
+        docker push "$IMAGE"
+
+        echo "IMAGE_PUSH_SUCCEEDED=$IMAGE"

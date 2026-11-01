@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qwen3-maintenance-supervisor
+  namespace: llm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: qwen3-maintenance-supervisor
+  namespace: llm
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["qwen3-maintenance-state"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: ["qwen3"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qwen3-maintenance-supervisor
+  namespace: llm
+subjects:
+  - kind: ServiceAccount
+    name: qwen3-maintenance-supervisor
+    namespace: llm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: qwen3-maintenance-supervisor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-maintenance-supervisor
+  namespace: llm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qwen3-maintenance-supervisor
+  template:
+    metadata:
+      labels:
+        app: qwen3-maintenance-supervisor
+    spec:
+      serviceAccountName: qwen3-maintenance-supervisor
+      nodeSelector:
+        pool: cpu
+      containers:
+        - name: supervisor
+          image: python:3.12-slim
+          command:
+            - python
+            - -u
+            - /app/supervisor.py
+          resources:
+            requests:
+              cpu: 25m
+              memory: 48Mi
+            limits:
+              cpu: 150m
+              memory: 128Mi
+          volumeMounts:
+            - name: source
+              mountPath: /app
+              readOnly: true
+      volumes:
+        - name: source
+          configMap:
+            name: qwen3-maintenance-supervisor-source

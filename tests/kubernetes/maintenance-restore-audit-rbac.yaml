@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qwen3-restore-audit
+  namespace: llm
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: qwen3-restore-audit
+  namespace: llm
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames:
+      - qwen3-maintenance-state
+      - qwen3-maintenance-storage-baseline
+      - qwen3-recovery-state
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames:
+      - model-files-qwen3-0
+      - model-files-qwen3-1
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: ["qwen3"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames:
+      - qwen3-coordinator
+      - qwen3-recovery
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: qwen3-restore-audit
+  namespace: llm
+subjects:
+  - kind: ServiceAccount
+    name: qwen3-restore-audit
+    namespace: llm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: qwen3-restore-audit
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: qwen3-restore-audit-pv
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    resourceNames:
+      - pvc-a3be470d-826c-4c97-b15c-db4174dc0720
+      - pvc-12ac957b-dafc-4795-9d5c-baf633669344
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: qwen3-restore-audit-pv
+subjects:
+  - kind: ServiceAccount
+    name: qwen3-restore-audit
+    namespace: llm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: qwen3-restore-audit-pv

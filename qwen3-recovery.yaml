@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-recovery
+  namespace: llm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: qwen3-recovery
+  template:
+    metadata:
+      labels:
+        app: qwen3-recovery
+    spec:
+      serviceAccountName: qwen3-recovery
+      nodeSelector:
+        pool: cpu
+
+      containers:
+        - name: recovery
+          image: python:3.12-slim
+          command:
+            - python
+            - -u
+            - /app/recovery_controller.py
+
+          env:
+            - name: AUTO_RECOVER
+              value: "false"
+
+          ports:
+            - containerPort: 8081
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            periodSeconds: 10
+
+          volumeMounts:
+            - name: source
+              mountPath: /app
+              readOnly: true
+
+      volumes:
+        - name: source
+          configMap:
+            name: qwen3-recovery-source

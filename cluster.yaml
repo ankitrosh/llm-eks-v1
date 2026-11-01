@@ -1,0 +1,38 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: llm-pipeline-v1
+  region: us-east-2
+  version: "1.36"
+  tags:
+    project: distributed-llm
+    environment: development
+
+availabilityZones:
+  - us-east-2a
+  - us-east-2b
+
+iam:
+  withOIDC: false
+
+vpc:
+  nat:
+    gateway: Disable
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+
+managedNodeGroups:
+  - name: cpu-system
+    instanceType: t3.large
+    amiFamily: AmazonLinux2023
+    desiredCapacity: 1
+    minSize: 1
+    maxSize: 1
+    volumeSize: 50
+    volumeType: gp3
+    privateNetworking: false
+    labels:
+      pool: cpu
+      workload: coordination

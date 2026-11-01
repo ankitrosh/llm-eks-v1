@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ebs-smoke-pvc
+  namespace: llm
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: llm-gp3
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ebs-smoke
+  namespace: llm
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    pool: gpu
+  containers:
+    - name: test
+      image: busybox:1.36
+      command:
+        - sh
+        - -c
+        - |
+          if [ -f /data/ebs-test.txt ]; then
+            echo "PREVIOUS FILE CONTENT:"
+            cat /data/ebs-test.txt
+          else
+            echo "No previous file"
+          fi
+
+          date -u > /data/ebs-test.txt
+          echo "EBS WRITE SUCCESS"
+          sleep 3600
+      volumeMounts:
+        - name: model-storage
+          mountPath: /data
+  volumes:
+    - name: model-storage
+      persistentVolumeClaim:
+        claimName: ebs-smoke-pvc

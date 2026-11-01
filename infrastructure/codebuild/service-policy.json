@@ -1,0 +1,36 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadSourceBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:GetBucketAcl"
+      ],
+      "Resource": "arn:aws:s3:::llm-qwen3-buildsrc-657173565477-us-east-2"
+    },
+    {
+      "Sid": "ReadSourceObject",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::llm-qwen3-buildsrc-657173565477-us-east-2/source/qwen3-codebuild-source.zip"
+    },
+    {
+      "Sid": "WriteBuildLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:us-east-2:657173565477:log-group:/aws/codebuild/qwen3-v1-image-build",
+        "arn:aws:logs:us-east-2:657173565477:log-group:/aws/codebuild/qwen3-v1-image-build:*"
+      ]
+    }
+  ]
+}

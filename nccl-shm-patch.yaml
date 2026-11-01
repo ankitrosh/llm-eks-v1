@@ -1,0 +1,13 @@
+spec:
+  template:
+    spec:
+      volumes:
+        - name: nccl-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+      containers:
+        - name: nccl
+          volumeMounts:
+            - name: nccl-shm
+              mountPath: /dev/shm

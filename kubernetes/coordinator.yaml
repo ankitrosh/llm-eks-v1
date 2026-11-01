@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-coordinator
+  namespace: llm
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: qwen3-coordinator
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations: {}
+      labels:
+        app: qwen3-coordinator
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - command:
+        - python
+        - -u
+        - /app/coordinator.py
+        env:
+        - name: PORT
+          value: '8080'
+        - name: RANK_URLS
+          value: http://qwen3-0.qwen3-headless.llm.svc.cluster.local:8000,http://qwen3-1.qwen3-headless.llm.svc.cluster.local:8000
+        - name: UPSTREAM_URL
+          value: http://qwen3-api.llm.svc.cluster.local:8000
+        - name: REQUEST_TIMEOUT
+          value: '300'
+        image: python:3.12-slim
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: coordinator
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /readyz
+            port: 8080
+            scheme: HTTP
+          periodSeconds: 5
+          successThreshold: 1
+          timeoutSeconds: 6
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /app
+          name: source
+          readOnly: true
+      dnsPolicy: ClusterFirst
+      nodeSelector:
+        pool: cpu
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: qwen3-coordinator-source
+        name: source
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-coordinator
+  namespace: llm
+spec:
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: qwen3-coordinator
+  sessionAffinity: None
+  type: ClusterIP

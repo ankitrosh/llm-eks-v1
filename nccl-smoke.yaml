@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nccl-smoke
+  namespace: llm
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: nccl-smoke
+  ports:
+    - name: rendezvous
+      port: 29618
+      targetPort: 29618
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nccl-smoke
+  namespace: llm
+spec:
+  serviceName: nccl-smoke
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: nccl-smoke
+  template:
+    metadata:
+      labels:
+        app: nccl-smoke
+    spec:
+      nodeSelector:
+        pool: gpu
+      volumes:
+        - name: nccl-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: nccl
+          image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:6886820e0696db161f219d6b2b45d9851cbb4a9da57a4879333f70fc5f02e718
+          volumeMounts:
+            - name: nccl-shm
+              mountPath: /dev/shm
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+
+              export RANK="${HOSTNAME##*-}"
+              export WORLD_SIZE=2
+              export MASTER_ADDR=nccl-smoke-0.nccl-smoke.llm.svc.cluster.local
+              export MASTER_PORT=29618
+
+              export NCCL_SOCKET_IFNAME=eth0
+              export NCCL_IB_DISABLE=1
+              export NCCL_DEBUG=WARN
+
+              echo "Starting NCCL rank ${RANK}/${WORLD_SIZE}"
+              echo "Master: ${MASTER_ADDR}:${MASTER_PORT}"
+
+              python -u - <<'PY'
+              import os
+              from datetime import timedelta
+
+              import torch
+              import torch.distributed as dist
+
+              rank = int(os.environ["RANK"])
+
+              torch.cuda.set_device(0)
+
+              dist.init_process_group(
+                  backend="nccl",
+                  timeout=timedelta(seconds=180),
+              )
+
+              print(f"Rank {rank}: NCCL initialized", flush=True)
+
+              x = torch.tensor(
+                  [rank + 1],
+                  device="cuda",
+                  dtype=torch.int64,
+              )
+
+              dist.all_reduce(x, op=dist.ReduceOp.SUM)
+              torch.cuda.synchronize()
+
+              result = x.item()
+              print(f"Rank {rank}: all_reduce = {result}", flush=True)
+
+              assert result == 3, f"Expected 3, got {result}"
+
+              if rank == 0:
+                  payload = torch.tensor([42], device="cuda", dtype=torch.int64)
+                  dist.send(payload, dst=1)
+                  print("Rank 0: sent 42 to Rank 1", flush=True)
+              else:
+                  payload = torch.zeros(1, device="cuda", dtype=torch.int64)
+                  dist.recv(payload, src=0)
+                  assert payload.item() == 42
+                  print("Rank 1: received 42 from Rank 0", flush=True)
+
+              dist.barrier(device_ids=[0])
+
+              print(f"Rank {rank}: NCCL TEST PASSED", flush=True)
+
+              dist.destroy_process_group()
+              PY
+
+              sleep infinity
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+            limits:
+              nvidia.com/gpu: 1
+          ports:
+            - containerPort: 29618
+              name: rendezvous

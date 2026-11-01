@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local lifecycle state
+.lifecycle-v2-state.json
+.paused-replicas.tsv
+
+# AWS credentials and local environments
+.env
+.env.*
+*.pem
+*.key
+.aws/
+
+# Generated cluster snapshots
+test-results/snapshots/
+
+# Temporary logs
+*.log
+*.tmp
+
+# Editor files
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+.aws/
+.ssh/
+.kube/
+kubeconfig*
+*.pem
+*.key
+*.p12
+*.pfx
+*.tfstate*
+
+# Generated results and build archives
+test-results/
+*.log
+*.zip
+*.tar
+*.tar.gz
+
+# Model weights and caches
+models/
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+*.onnx
+
+# Environment-specific maintenance state
+tests/maintenance-storage-baseline.json

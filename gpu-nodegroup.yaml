@@ -1,0 +1,25 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: llm-pipeline-v1
+  region: us-east-2
+
+iam:
+  withOIDC: false
+
+managedNodeGroups:
+  - name: gpu-a10g
+    instanceType: g5.xlarge
+    amiFamily: AmazonLinux2023
+    desiredCapacity: 2
+    minSize: 0
+    maxSize: 2
+    availabilityZones:
+      - us-east-2b
+    privateNetworking: false
+    volumeSize: 120
+    volumeType: gp3
+    labels:
+      pool: gpu
+      workload: inference

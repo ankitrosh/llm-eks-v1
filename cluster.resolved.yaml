@@ -1,0 +1,72 @@
+accessConfig:
+  authenticationMode: API_AND_CONFIG_MAP
+addonsConfig: {}
+apiVersion: eksctl.io/v1alpha5
+availabilityZones:
+- us-east-2a
+- us-east-2b
+iam:
+  vpcResourceControllerPolicy: true
+  withOIDC: false
+kind: ClusterConfig
+managedNodeGroups:
+- amiFamily: AmazonLinux2023
+  desiredCapacity: 1
+  disableIMDSv1: true
+  disablePodIMDS: false
+  iam:
+    withAddonPolicies:
+      albIngress: false
+      appMesh: null
+      appMeshPreview: null
+      autoScaler: false
+      awsLoadBalancerController: false
+      certManager: false
+      cloudWatch: false
+      ebs: false
+      efs: false
+      externalDNS: false
+      fsx: false
+      imageBuilder: false
+      xRay: false
+  instanceSelector: {}
+  instanceType: t3.large
+  labels:
+    alpha.eksctl.io/cluster-name: llm-pipeline-v1
+    alpha.eksctl.io/nodegroup-name: cpu-system
+    pool: cpu
+    workload: coordination
+  maxSize: 1
+  minSize: 1
+  name: cpu-system
+  privateNetworking: false
+  releaseVersion: ""
+  securityGroups:
+    withLocal: null
+    withShared: null
+  ssh:
+    allow: false
+  tags:
+    alpha.eksctl.io/nodegroup-name: cpu-system
+    alpha.eksctl.io/nodegroup-type: managed
+  volumeIOPS: 3000
+  volumeSize: 50
+  volumeThroughput: 125
+  volumeType: gp3
+metadata:
+  name: llm-pipeline-v1
+  region: us-east-2
+  tags:
+    environment: development
+    project: distributed-llm
+  version: "1.36"
+privateCluster:
+  enabled: false
+  skipEndpointCreation: false
+vpc:
+  clusterEndpoints:
+    privateAccess: true
+    publicAccess: true
+  manageSharedNodeSecurityGroupRules: true
+  nat:
+    gateway: Disable

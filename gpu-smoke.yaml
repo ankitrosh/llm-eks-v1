@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gpu-smoke
+  namespace: llm
+spec:
+  selector:
+    matchLabels:
+      app: gpu-smoke
+  template:
+    metadata:
+      labels:
+        app: gpu-smoke
+    spec:
+      nodeSelector:
+        pool: gpu
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: cuda-test
+          image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:6886820e0696db161f219d6b2b45d9851cbb4a9da57a4879333f70fc5f02e718
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -e
+              python - <<'PY'
+              import torch
+
+              print("PyTorch:", torch.__version__, flush=True)
+              print("CUDA:", torch.cuda.is_available(), flush=True)
+              print("GPU:", torch.cuda.get_device_name(0), flush=True)
+              print("NCCL:", torch.distributed.is_nccl_available(), flush=True)
+
+              a = torch.randn(1024, 1024, device="cuda")
+              b = a @ a
+              torch.cuda.synchronize()
+
+              print("GPU COMPUTE SUCCESS:", tuple(b.shape), flush=True)
+              PY
+              sleep 600
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+            limits:
+              nvidia.com/gpu: 1

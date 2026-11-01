@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: qwen3-recovery
+  namespace: llm
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: qwen3-recovery
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      annotations: {}
+      labels:
+        app: qwen3-recovery
+    spec:
+      containers:
+      - command:
+        - python
+        - -u
+        - /app/recovery_controller.py
+        env:
+        - name: AUTO_RECOVER
+          value: 'true'
+        image: python:3.12-slim
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 8081
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: recovery
+        ports:
+        - containerPort: 8081
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 250m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /app
+          name: source
+          readOnly: true
+      dnsPolicy: ClusterFirst
+      nodeSelector:
+        pool: cpu
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: qwen3-recovery
+      serviceAccountName: qwen3-recovery
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: qwen3-recovery-source
+        name: source
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: qwen3-recovery
+  namespace: llm
+spec:
+  ports:
+  - name: http
+    port: 8081
+    protocol: TCP
+    targetPort: 8081
+  selector:
+    app: qwen3-recovery
+  sessionAffinity: None
+  type: ClusterIP

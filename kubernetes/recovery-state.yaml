@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qwen3-recovery-state
+  namespace: llm
+data:
+  state: "{\n  \"mode\": \"RUNNING\",\n  \"phase\": \"STARTING\",\n  \"generation\"\
+    : 0,\n  \"recoveries\": 0,\n  \"attempt\": 0,\n  \"baseline\": null,\n  \"started_at\"\
+    : null,\n  \"last_error\": null,\n  \"last_recovery_seconds\": null\n}"

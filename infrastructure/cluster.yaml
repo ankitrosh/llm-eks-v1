@@ -1,0 +1,93 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: llm-pipeline-v1
+  region: us-east-2
+  version: "1.36"
+
+iam:
+  withOIDC: false
+  serviceRoleARN: arn:aws:iam::657173565477:role/eksctl-llm-pipeline-v1-cluster-ServiceRole-2522J3C0NvtK
+
+vpc:
+  id: vpc-02067d523d8dcdcb4
+
+  clusterEndpoints:
+    publicAccess: true
+    privateAccess: true
+
+  subnets:
+    public:
+      public-2a:
+        id: subnet-0258f728367a2e5c1
+      public-2b:
+        id: subnet-0bed0e4744fc96547
+
+    private:
+      private-2a:
+        id: subnet-035aac711390f8574
+      private-2b:
+        id: subnet-01c4d9bf17ba65ff0
+
+addons:
+  - name: vpc-cni
+    version: v1.22.4-eksbuild.10
+  - name: kube-proxy
+    version: v1.36.0-eksbuild.58
+  - name: coredns
+    version: v1.14.7-eksbuild.22
+  - name: eks-pod-identity-agent
+    version: v1.4.1-eksbuild.3
+
+managedNodeGroups:
+  - name: cpu-system
+    instanceType: t3.large
+    amiFamily: AmazonLinux2023
+    privateNetworking: false
+
+    subnets:
+      - public-2a
+      - public-2b
+
+    minSize: 0
+    desiredCapacity: 1
+    maxSize: 1
+
+    volumeSize: 50
+    volumeType: gp3
+    volumeIOPS: 3000
+    volumeThroughput: 125
+    disableIMDSv1: true
+
+    labels:
+      pool: cpu
+      workload: coordination
+
+    iam:
+      instanceRoleARN: arn:aws:iam::657173565477:role/eksctl-llm-pipeline-v1-nodegroup-c-NodeInstanceRole-S3oRWRHncEZL
+
+  - name: gpu-a10g
+    instanceType: g5.xlarge
+    amiFamily: AmazonLinux2023
+    privateNetworking: false
+
+    subnets:
+      - public-2b
+
+    minSize: 0
+    desiredCapacity: 2
+    maxSize: 2
+
+    volumeSize: 120
+    volumeType: gp3
+    volumeIOPS: 3000
+    volumeThroughput: 125
+    disableIMDSv1: true
+
+    labels:
+      pool: gpu
+      workload: inference
+
+    iam:
+      instanceRoleARN: arn:aws:iam::657173565477:role/eksctl-llm-pipeline-v1-nodegroup-g-NodeInstanceRole-w11ApLuHk31U

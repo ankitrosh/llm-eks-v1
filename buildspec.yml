@@ -1,0 +1,106 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+
+        echo "=== BUILD ENVIRONMENT ==="
+        docker info
+        df -h /
+
+        echo "=== SOURCE VERIFICATION ==="
+        test -s docker/Dockerfile
+        test -s docker/requirements.lock
+
+        for file in \
+          qwen3_serve.py \
+          qwen3_nccl_generate.py \
+          qwen3_prepare_step.py \
+          qwen3_stage_loader.py \
+          docker-entrypoint.sh
+        do
+          test -s "src/gpu/$file"
+        done
+
+        echo "Source files present."
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+
+        REGION="us-east-2"
+        ACCOUNT="657173565477"
+        REPOSITORY="qwen3-14b-pipeline"
+
+        test "${AWS_DEFAULT_REGION}" = "$REGION"
+        test "$(aws sts get-caller-identity --query Account --output text)" = "$ACCOUNT"
+
+        TAG="${IMAGE_TAG:-v1-rebuild-test}"
+        REGISTRY="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
+        IMAGE="$REGISTRY/$REPOSITORY:$TAG"
+
+        echo "=== BUILDING $IMAGE ==="
+
+        docker build \
+          --platform linux/amd64 \
+          --progress=plain \
+          -f docker/Dockerfile \
+          -t "$IMAGE" \
+          .
+
+        echo "=== PACKAGE SMOKE TEST ==="
+
+        docker run --rm \
+          --platform linux/amd64 \
+          --entrypoint python \
+          "$IMAGE" \
+          -c '
+        import torch
+        import transformers
+        import fastapi
+        import uvicorn
+
+        assert torch.__version__ == "2.14.1+cu130"
+        assert torch.version.cuda == "13.0"
+        assert transformers.__version__ == "4.56.2"
+        assert fastapi.__version__ == "0.162.0"
+        assert uvicorn.__version__ == "0.54.0"
+
+        print("PyTorch:", torch.__version__)
+        print("CUDA:", torch.version.cuda)
+        print("NCCL:", torch.cuda.nccl.version())
+        print("Package smoke test passed")
+        '
+
+        if [[ "${PUBLISH_TO_ECR:-false}" == "true" ]]; then
+          echo "=== PUBLISHING TO ECR ==="
+
+          aws ecr get-login-password \
+            --region "$REGION" |
+            docker login \
+              --username AWS \
+              --password-stdin "$REGISTRY"
+
+          docker push "$IMAGE"
+
+          aws ecr describe-images \
+            --region "$REGION" \
+            --repository-name "$REPOSITORY" \
+            --image-ids "imageTag=$TAG" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text
+        else
+          echo "ECR publishing disabled."
+        fi
+
+        echo "Build workflow completed."
+
+artifacts:
+  files:
+    - buildspec.yml
