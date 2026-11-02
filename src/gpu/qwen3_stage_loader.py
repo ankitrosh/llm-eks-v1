@@ -1,5 +1,6 @@
 """Rank-local Qwen3 loader: Transformers 4.56.2, BF16, eager attention."""
 import gc
+import os
 import json
 from pathlib import Path
 
@@ -31,7 +32,22 @@ class Qwen3Stage(nn.Module):
         if not 0 < split < self.cfg.num_hidden_layers:
             raise ValueError('invalid split')
 
-        self.cfg._attn_implementation = 'eager'
+        # V2: runtime-selectable attention, with V1 as the default.
+        backend = os.environ.get(
+            "LLM_ATTENTION_BACKEND", "eager"
+        ).strip().lower()
+
+        if backend not in {"eager", "sdpa"}:
+            raise ValueError(
+                f"Unsupported attention backend: {backend}. "
+                "Currently supported: eager, sdpa"
+            )
+
+        self.cfg._attn_implementation = backend
+        print(
+            f"rank{rank} attention backend: {backend}",
+            flush=True,
+        )
         self.rank = rank
 
         self.start, self.stop = (
