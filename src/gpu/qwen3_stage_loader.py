@@ -180,23 +180,37 @@ class Qwen3Stage(nn.Module):
             device=self.device,
         )
 
-        key = torch.arange(
-            start_position + q,
-            device=self.device,
+        # Mask-free SDPA is safe for:
+        # 1. Fresh causal prefill (no previous KV cache).
+        # 2. Single-token decode (all cached keys are visible).
+        #
+        # Keep the explicit mask for cached multi-token queries,
+        # where non-square causal alignment needs special care.
+        use_unmasked_sdpa = (
+            self.cfg._attn_implementation == 'sdpa'
+            and (start_position == 0 or q == 1)
         )
 
-        visible = key[None, :] <= pos[:, None]
+        if use_unmasked_sdpa:
+            mask = None
+        else:
+            key = torch.arange(
+                start_position + q,
+                device=self.device,
+            )
 
-        mask = torch.zeros(
-            (1, 1, q, start_position + q),
-            dtype=self.dtype,
-            device=self.device,
-        )
+            visible = key[None, :] <= pos[:, None]
 
-        mask.masked_fill_(
-            ~visible[None, None, :, :],
-            torch.finfo(self.dtype).min,
-        )
+            mask = torch.zeros(
+                (1, 1, q, start_position + q),
+                dtype=self.dtype,
+                device=self.device,
+            )
+
+            mask.masked_fill_(
+                ~visible[None, None, :, :],
+                torch.finfo(self.dtype).min,
+            )
 
         positions = pos.unsqueeze(0)
         rotary = self.rope(h, positions)
