@@ -1,0 +1,196 @@
+{
+  "model": "JunHowie/Qwen3-32B-GPTQ-Int8",
+  "pipeline_split": [
+    32,
+    32
+  ],
+  "gpu": "NVIDIA A10G x2",
+  "attention_backend": "sdpa",
+  "warmups": 3,
+  "runs": 10,
+  "requested_output_tokens": 64,
+  "prompt": "In distributed inference, GPUs compute matrix multiplications while NCCL sends activation tensors between pipeline stages. In distributed inference, GPUs compute matrix multiplications while NCCL sends activation tensors between pipeline stages. In distributed inference, GPUs compute matrix multiplications while NCCL sends activation tensors between pipeline stages. In distributed inference, GPUs compute matrix multiplications while NCCL sends activation tensors between pipeline stages. In distributed inference, GPUs compute matrix multiplications while NCCL sends activation tensors between pipeline stages. Explain how pipeline parallelism enables larger models to run across multiple GPUs. Give six numbered practical points with sufficient detail.",
+  "summary": {
+    "e2e_ms": {
+      "median": 21942.052,
+      "mean": 21939.593,
+      "p95": 21945.403,
+      "min": 21931.018,
+      "max": 21945.724
+    },
+    "ttft_ms": {
+      "median": 456.632,
+      "mean": 456.687,
+      "p95": 457.467,
+      "min": 456.143,
+      "max": 457.891
+    },
+    "decode_interval_median_ms": {
+      "median": 341.034,
+      "mean": 340.985,
+      "p95": 341.084,
+      "min": 340.847,
+      "max": 341.086
+    },
+    "stage0_compute_gpu_ms": {
+      "median": 10833.795,
+      "mean": 10833.801,
+      "p95": 10835.324,
+      "min": 10831.948,
+      "max": 10835.694
+    },
+    "stage0_communication_blocking_ms": {
+      "median": 11093.017,
+      "mean": 11092.288,
+      "p95": 11098.045,
+      "min": 11084.676,
+      "max": 11098.063
+    },
+    "peak_allocated_mib": {
+      "median": 17110.9,
+      "mean": 17110.9,
+      "p95": 17110.9,
+      "min": 17110.9,
+      "max": 17110.9
+    },
+    "wall_ms": {
+      "median": 21950.393,
+      "mean": 21948.156,
+      "p95": 21954.179,
+      "min": 21939.408,
+      "max": 21954.543
+    }
+  },
+  "records": [
+    {
+      "run": 1,
+      "wall_ms": 21954.543,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21945.724,
+      "ttft_ms": 456.585,
+      "decode_interval_median_ms": 341.082,
+      "stage0_compute_gpu_ms": 10834.872,
+      "stage0_communication_blocking_ms": 11097.062,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 2,
+      "wall_ms": 21953.176,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21945.011,
+      "ttft_ms": 456.451,
+      "decode_interval_median_ms": 341.045,
+      "stage0_compute_gpu_ms": 10833.455,
+      "stage0_communication_blocking_ms": 11098.023,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 3,
+      "wall_ms": 21951.968,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21943.782,
+      "ttft_ms": 456.948,
+      "decode_interval_median_ms": 341.086,
+      "stage0_compute_gpu_ms": 10832.683,
+      "stage0_communication_blocking_ms": 11098.063,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 4,
+      "wall_ms": 21943.628,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21935.12,
+      "ttft_ms": 456.825,
+      "decode_interval_median_ms": 340.898,
+      "stage0_compute_gpu_ms": 10831.948,
+      "stage0_communication_blocking_ms": 11089.527,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 5,
+      "wall_ms": 21949.597,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21941.007,
+      "ttft_ms": 456.679,
+      "decode_interval_median_ms": 341.032,
+      "stage0_compute_gpu_ms": 10834.551,
+      "stage0_communication_blocking_ms": 11092.663,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 6,
+      "wall_ms": 21953.735,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21944.438,
+      "ttft_ms": 456.204,
+      "decode_interval_median_ms": 341.054,
+      "stage0_compute_gpu_ms": 10834.654,
+      "stage0_communication_blocking_ms": 11095.939,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 7,
+      "wall_ms": 21951.188,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21943.096,
+      "ttft_ms": 457.891,
+      "decode_interval_median_ms": 341.037,
+      "stage0_compute_gpu_ms": 10835.694,
+      "stage0_communication_blocking_ms": 11093.37,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 8,
+      "wall_ms": 21943.81,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21935.539,
+      "ttft_ms": 456.323,
+      "decode_interval_median_ms": 340.91,
+      "stage0_compute_gpu_ms": 10834.135,
+      "stage0_communication_blocking_ms": 11088.332,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 9,
+      "wall_ms": 21939.408,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21931.018,
+      "ttft_ms": 456.821,
+      "decode_interval_median_ms": 340.859,
+      "stage0_compute_gpu_ms": 10832.592,
+      "stage0_communication_blocking_ms": 11085.223,
+      "peak_allocated_mib": 17110.9
+    },
+    {
+      "run": 10,
+      "wall_ms": 21940.508,
+      "prompt_tokens": 130,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "e2e_ms": 21931.194,
+      "ttft_ms": 456.143,
+      "decode_interval_median_ms": 340.847,
+      "stage0_compute_gpu_ms": 10833.426,
+      "stage0_communication_blocking_ms": 11084.676,
+      "peak_allocated_mib": 17110.9
+    }
+  ]
+}

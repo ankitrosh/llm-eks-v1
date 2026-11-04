@@ -1,0 +1,17 @@
+FROM 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:f2700e99e613ac648fc034026e1f705039c25972b7424e2f4c6435d38177cac6
+
+# Preserve the already verified Marlin model loader and CUDA kernels.
+# Replace only the inference serving layer and add cache modules.
+COPY src/gpu/prefix_cache.py /app/prefix_cache.py
+COPY src/gpu/prefix_kv.py /app/prefix_kv.py
+COPY src/gpu/qwen3_serve.py /app/qwen3_serve.py
+
+# Default: existing uncached inference behavior.
+ENV LLM_PREFIX_CACHE_ENABLED=0
+
+RUN python -m py_compile \
+      /app/prefix_cache.py \
+      /app/prefix_kv.py \
+      /app/qwen3_serve.py && \
+    PYTHONPATH=/app:/opt/marlin-output python -c \
+      "import qwen3_serve; import prefix_cache; import prefix_kv; print('PASS: Prefix cache runtime imports')"

@@ -1,0 +1,8 @@
+FROM 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:92c72a89d24febfbc6d31f36bb895d621298ca80b991596bd541b52c7b110856
+
+COPY src/gpu/qwen3_stage_loader.py /app/qwen3_stage_loader.py
+COPY tests/test_v2_sdpa_lower_right.py /app/tests/test_v2_sdpa_lower_right.py
+
+RUN python -m py_compile \
+    /app/qwen3_stage_loader.py \
+    /app/tests/test_v2_sdpa_lower_right.py

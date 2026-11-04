@@ -1,0 +1,6 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - bash scripts/build_v2_marlin_image.sh

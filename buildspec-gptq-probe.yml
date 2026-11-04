@@ -1,0 +1,84 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+
+        REGION=us-east-2
+        ACCOUNT=657173565477
+        REGISTRY="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
+
+        test "$(aws sts get-caller-identity --query Account --output text)" = "$ACCOUNT"
+        test -s docker/Dockerfile.gptq-probe
+
+        echo "========== ECR AUTHENTICATION =========="
+
+        aws ecr get-login-password --region "$REGION" |
+          docker login \
+            --username AWS \
+            --password-stdin "$REGISTRY"
+
+        echo "PASS: ECR authentication"
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+
+        REGION=us-east-2
+        ACCOUNT=657173565477
+        REPOSITORY=qwen3-14b-pipeline
+        TAG=v2-gptq-probe-4.0.0-r2
+
+        IMAGE="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/$REPOSITORY:$TAG"
+
+        echo "========== BUILD EXPERIMENTAL IMAGE =========="
+
+        docker build \
+          --platform linux/amd64 \
+          --progress=plain \
+          -f docker/Dockerfile.gptq-probe \
+          -t "$IMAGE" \
+          .
+
+        echo "========== RUNTIME SMOKE TEST =========="
+
+        docker run --rm \
+          --platform linux/amd64 \
+          --entrypoint python \
+          "$IMAGE" \
+          -c '
+        import torch
+        import transformers
+        from gptqmodel.nn_modules.qlinear.tritonv2 import TRITON_AVAILABLE
+
+        assert torch.__version__ == "2.14.1+cu130"
+        assert transformers.__version__ == "4.56.2"
+        assert TRITON_AVAILABLE
+        print("PASS: GPTQ experimental runtime")
+        '
+
+        if [[ "${PUBLISH_TO_ECR:-false}" == "true" ]]; then
+          echo "========== PUBLISH EXPERIMENTAL IMAGE =========="
+          docker push "$IMAGE"
+
+          aws ecr describe-images \
+            --region "$REGION" \
+            --repository-name "$REPOSITORY" \
+            --image-ids "imageTag=$TAG" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text
+        else
+          echo "ECR publishing disabled."
+        fi
+
+        echo "PASS: GPTQ image build completed"
+
+artifacts:
+  files:
+    - buildspec-gptq-probe.yml

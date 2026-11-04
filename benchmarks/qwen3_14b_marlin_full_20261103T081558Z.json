@@ -1,0 +1,121 @@
+{
+  "model": "Qwen3-14B-GPTQ-Int8",
+  "revision": "9b876cd2f6f2c870afd18bb5b458fb38ab3e3e00",
+  "split": [
+    20,
+    20
+  ],
+  "backend": "marlin",
+  "input_tokens": 130,
+  "requested_output_tokens": 64,
+  "prompt_source": "generated token-matched prompt",
+  "prompt": "Write a detailed technical tutorial of at least 700 words explaining transformer inference, attention, KV caching, quantization, GPU kernels, batching, memory bandwidth, and NCCL communication. Explain each topic thoroughly with practical examples. Additional topics: example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example example\nBegin the detailed tutorial now.",
+  "warmups": 3,
+  "runs": [
+    {
+      "run": 1,
+      "e2e_ms": 3137.456,
+      "ttft_ms": 108.237,
+      "decode_interval_median_ms": 47.762,
+      "client_wall_ms": 3145.806468999581,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 2,
+      "e2e_ms": 3146.815,
+      "ttft_ms": 109.483,
+      "decode_interval_median_ms": 48.041,
+      "client_wall_ms": 3155.489978999867,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 3,
+      "e2e_ms": 3151.676,
+      "ttft_ms": 108.485,
+      "decode_interval_median_ms": 48.22,
+      "client_wall_ms": 3159.9925780001286,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 4,
+      "e2e_ms": 3153.824,
+      "ttft_ms": 108.849,
+      "decode_interval_median_ms": 48.153,
+      "client_wall_ms": 3162.1235019993037,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 5,
+      "e2e_ms": 3151.371,
+      "ttft_ms": 108.419,
+      "decode_interval_median_ms": 47.988,
+      "client_wall_ms": 3159.9190690003525,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 6,
+      "e2e_ms": 3108.43,
+      "ttft_ms": 108.634,
+      "decode_interval_median_ms": 47.582,
+      "client_wall_ms": 3116.975069999171,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 7,
+      "e2e_ms": 3135.954,
+      "ttft_ms": 108.56,
+      "decode_interval_median_ms": 47.733,
+      "client_wall_ms": 3145.679125999777,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 8,
+      "e2e_ms": 3153.426,
+      "ttft_ms": 108.355,
+      "decode_interval_median_ms": 47.933,
+      "client_wall_ms": 3161.6163369999413,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 9,
+      "e2e_ms": 3130.308,
+      "ttft_ms": 108.522,
+      "decode_interval_median_ms": 48.002,
+      "client_wall_ms": 3138.232020999567,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    },
+    {
+      "run": 10,
+      "e2e_ms": 3142.281,
+      "ttft_ms": 108.621,
+      "decode_interval_median_ms": 48.058,
+      "client_wall_ms": 3151.2611309999556,
+      "generated_tokens": 64,
+      "finish_reason": "length",
+      "peak_allocated_mib": 8046.8
+    }
+  ],
+  "baseline_file": "benchmarks/qwen3_14b_int8_smoke_20261103.json",
+  "median_e2e_ms": 3144.548,
+  "median_ttft_ms": 108.541,
+  "median_decode_ms": 47.995000000000005,
+  "throughput_tokens_per_second": 20.835503698301906
+}

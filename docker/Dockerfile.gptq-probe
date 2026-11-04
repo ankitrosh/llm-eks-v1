@@ -1,0 +1,64 @@
+# Isolated GPTQModel 4.0.0 + Triton compatibility probe.
+# The verified V1 and SDPA images remain unchanged.
+
+FROM 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:05044ec3a00c3dd8c40a2d19c5a9b57553b0df0ff55c9baf9275146b7d525e2b
+
+ENV BUILD_CUDA_EXT=0 \
+    GPTQMODEL_FORCE_BUILD=1
+
+# Prevent the GPTQModel dependency resolver from replacing
+# our verified inference-runtime packages.
+RUN printf '%s\n' \
+      'torch==2.14.1+cu130' \
+      'transformers==4.56.2' \
+      'accelerate==1.15.0' \
+      'safetensors==0.8.0' \
+      > /tmp/gptq-constraints.txt \
+    && python -m pip install \
+      --no-cache-dir \
+      --no-build-isolation \
+      --constraint /tmp/gptq-constraints.txt \
+      'gptqmodel==4.0.0' \
+    && python -m pip install \
+      --no-cache-dir \
+      --constraint /tmp/gptq-constraints.txt \
+      'datasets==3.6.0' \
+    && python -m pip check
+
+# CPU-only construction check. GPU execution is a later test.
+RUN python - <<'PY'
+import torch
+import transformers
+import triton
+
+from gptqmodel.nn_modules.qlinear.tritonv2 import (
+    TritonV2QuantLinear,
+    TRITON_AVAILABLE,
+)
+
+assert torch.__version__ == "2.14.1+cu130"
+assert transformers.__version__ == "4.56.2"
+assert torch.version.cuda == "13.0"
+assert TRITON_AVAILABLE
+
+layer = TritonV2QuantLinear(
+    bits=8,
+    group_size=128,
+    desc_act=False,
+    sym=True,
+    in_features=128,
+    out_features=128,
+    bias=False,
+    pack_dtype=torch.int32,
+)
+
+state = layer.state_dict()
+for name in ("qweight", "qzeros", "scales", "g_idx"):
+    assert name in state, name
+
+print("PyTorch:", torch.__version__)
+print("Transformers:", transformers.__version__)
+print("Triton:", triton.__version__)
+print("PASS: GPTQ quantized module construction")
+print("GPU kernel execution remains untested")
+PY

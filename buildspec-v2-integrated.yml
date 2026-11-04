@@ -1,0 +1,68 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        REGISTRY=657173565477.dkr.ecr.us-east-2.amazonaws.com
+
+        aws ecr get-login-password --region us-east-2 |
+          docker login --username AWS \
+            --password-stdin "$REGISTRY"
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+
+        IMAGE="657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline:v2-qwen3-32b-gptq-r1"
+
+        echo "========== BUILD V2 IMAGE =========="
+
+        docker build \
+          --platform linux/amd64 \
+          --progress=plain \
+          -f docker/Dockerfile.v2-integrated \
+          -t "$IMAGE" \
+          .
+
+        echo "========== TEST GPTQ LAYER CONSTRUCTION =========="
+
+        docker run --rm \
+          --network none \
+          --platform linux/amd64 \
+          --mount "type=bind,source=$CODEBUILD_SRC_DIR/scripts/v2_gptq_layer_probe.py,target=/app/v2_gptq_layer_probe.py,readonly" \
+          --mount "type=bind,source=$CODEBUILD_SRC_DIR/tests/fixtures/qwen3-32b-gptq,target=/tmp/gptq-metadata,readonly" \
+          --entrypoint python \
+          "$IMAGE" \
+          /app/v2_gptq_layer_probe.py \
+          --metadata-dir /tmp/gptq-metadata
+
+        echo "========== TEST GPTQ ZERO-POINT CONVERSION =========="
+
+        docker run --rm \
+          --network none \
+          --platform linux/amd64 \
+          --mount "type=bind,source=$CODEBUILD_SRC_DIR/scripts/v2_gptq_zero_format_probe.py,target=/app/v2_gptq_zero_format_probe.py,readonly" \
+          --entrypoint python \
+          "$IMAGE" \
+          /app/v2_gptq_zero_format_probe.py
+
+        echo "========== PUBLISH V2 IMAGE =========="
+
+        docker push "$IMAGE"
+
+        echo "========== IMMUTABLE DIGEST =========="
+
+        aws ecr describe-images \
+          --region us-east-2 \
+          --repository-name qwen3-14b-pipeline \
+          --image-ids imageTag=v2-qwen3-32b-gptq-r1 \
+          --query 'imageDetails[0].imageDigest' \
+          --output text
+
+        echo "PASS: Integrated V2 image published"

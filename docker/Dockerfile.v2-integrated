@@ -1,0 +1,11 @@
+# Verified GPTQModel 4.0.0 + Triton runtime.
+FROM 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:614e06a9697e62d147da55ccce13df4f115197d572dfe94df9667a576acc5650
+
+# Replace only the model loader.
+# Preserve the existing serving entrypoint, NCCL code and runtime.
+COPY src/gpu/qwen3_stage_loader.py /app/qwen3_stage_loader.py
+COPY src/gpu/qwen3_prepare_step.py /app/qwen3_prepare_step.py
+
+RUN python -m py_compile \
+    /app/qwen3_stage_loader.py \
+    /app/qwen3_prepare_step.py

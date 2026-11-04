@@ -1,0 +1,30 @@
+{
+  "model": "JunHowie/Qwen3-14B-GPTQ-Int8",
+  "revision": "9b876cd2f6f2c870afd18bb5b458fb38ab3e3e00",
+  "split": [20, 20],
+  "gpu": "2x NVIDIA A10G",
+  "backend": "TritonV2 GPTQ + SDPA",
+  "input_tokens": 130,
+  "requested_output_tokens": 64,
+  "correctness_request": {
+    "generated_tokens": 28,
+    "e2e_ms": 4244.928,
+    "finish_reason": "stop"
+  },
+  "runs": [
+    {"e2e_ms": 10069.03, "ttft_ms": 498.22, "decode_ms": 151.82, "output_tokens": 64},
+    {"e2e_ms": 9764.81, "ttft_ms": 202.17, "decode_ms": 151.75, "output_tokens": 64},
+    {"e2e_ms": 9760.65, "ttft_ms": 202.06, "decode_ms": 151.77, "output_tokens": 64}
+  ],
+  "median_e2e_ms": 9764.814,
+  "median_ttft_ms": 202.171,
+  "median_decode_ms": 151.770,
+  "peak_pytorch_allocated_mib": 8240.6,
+  "nvidia_smi_used_mib": {
+    "rank0": 8764,
+    "rank1": 8764
+  },
+  "completed_requests": 4,
+  "failed_requests": 0,
+  "pod_restarts": 0
+}
