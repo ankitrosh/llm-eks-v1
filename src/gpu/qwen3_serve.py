@@ -626,6 +626,24 @@ def parse_args():
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = parse_args()
+
+    # V3_RUNTIME_PLAN_BOOTSTRAP
+    # Optional: a compiled plan takes precedence over --split
+    # and the legacy optimization environment defaults.
+    from llm_runtime.v3_plan_loader import (
+        configure_serving_from_plan,
+    )
+
+    active_plan = configure_serving_from_plan(args)
+
+    if active_plan is not None:
+        print(
+            "V3 runtime plan accepted: "
+            f"rank={args.rank} "
+            f"split={args.split} "
+            f"sha256={active_plan['plan_sha256']}",
+            flush=True,
+        )
     torch.cuda.set_device(0)
     state = State(args.rank, args.queue_capacity, args.max_new_tokens, args.request_timeout)
 
