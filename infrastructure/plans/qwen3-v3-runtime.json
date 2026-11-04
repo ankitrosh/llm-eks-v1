@@ -1,0 +1,46 @@
+{
+  "plan_version": 1,
+  "status": "STATICALLY_VALIDATED_NOT_EXECUTED",
+  "model": {
+    "id": "JunHowie/Qwen3-14B-GPTQ-Int8",
+    "revision": "main",
+    "type": "qwen3",
+    "layers": 40,
+    "dtype": "bfloat16",
+    "metadata_sha256": "3408ed3263add7ecab2533aaf70ff8388e6dc5fab48d0e6fa0acb68049a7cc23"
+  },
+  "pipeline": {
+    "num_ranks": 2,
+    "partition": "manual",
+    "stages": [
+      {
+        "rank": 0,
+        "start_layer": 0,
+        "end_layer": 20
+      },
+      {
+        "rank": 1,
+        "start_layer": 20,
+        "end_layer": 40
+      }
+    ],
+    "split": 20
+  },
+  "runtime_environment": {
+    "LLM_STAGE_IMPL": "v3_adapter",
+    "LLM_ATTENTION_BACKEND": "sdpa",
+    "LLM_SDPA_PREFIX_MASK": "explicit",
+    "LLM_PREFIX_CACHE_ENABLED": "1",
+    "LLM_PREFIX_CACHE_MAX_MIB": "256",
+    "LLM_PREFIX_CACHE_MAX_ENTRIES": "4",
+    "LLM_PREFIX_CACHE_MIN_TOKENS": "64",
+    "LLM_GPTQ_BACKEND": "marlin"
+  },
+  "not_run": [
+    "Model weights and tokenizer not loaded",
+    "GPU memory feasibility not tested",
+    "NCCL inference correctness not tested",
+    "Runtime plan not connected to serving launcher yet"
+  ],
+  "plan_sha256": "75799170c5798f10b1fe2555252315f346066ab01d5be74fb9fabeae12281bfa"
+}

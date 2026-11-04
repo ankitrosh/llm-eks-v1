@@ -66,6 +66,10 @@ print("NCCL:", torch.cuda.nccl.version())
 print("Python environment verified")
 PY
 
+# V2 candidate only: test SDPA while preserving the original V1 image.
+# Kubernetes can override this variable for later A/B tests.
+ENV LLM_ATTENTION_BACKEND=sdpa
+
 WORKDIR /app
 
 COPY src/gpu/ /app/

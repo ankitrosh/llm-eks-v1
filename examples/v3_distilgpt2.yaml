@@ -1,0 +1,38 @@
+schema_version: 1
+
+model:
+  id: distilbert/distilgpt2
+  num_layers: 6
+  dtype: float32
+
+pipeline:
+  num_ranks: 3
+  partition: manual
+  stages:
+    - {rank: 0, start_layer: 0, end_layer: 2}
+    - {rank: 1, start_layer: 2, end_layer: 4}
+    - {rank: 2, start_layer: 4, end_layer: 6}
+
+attention:
+  default:
+    implementation: model_native
+    backend: auto
+
+  overrides:
+    - layers: [2, 3]
+      implementation: custom
+      plugin: experiments.my_attention:MyAttention
+
+runtime:
+  device: cpu
+  distributed_backend: gloo
+
+scheduler:
+  mode: pipelined
+  max_active_requests: 4
+
+  batching:
+    enabled: false
+
+deployment:
+  platform: local

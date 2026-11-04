@@ -354,6 +354,23 @@ print(json.dumps({
 }))
 '''
 
+    # Verify both ranks actually selected SDPA during model startup.
+    for rank in (0, 1):
+        logs = kube(
+            "logs", "-n", NS, f"qwen3-{rank}",
+            "-c", "runtime", "--tail=1500",
+            timeout=90,
+        )
+
+        expected = f"rank{rank} attention backend: sdpa"
+
+        if expected not in logs:
+            raise RuntimeError(
+                f"Rank {rank} did not confirm SDPA selection"
+            )
+
+        note(f"Rank {rank}: SDPA backend confirmed")
+
     gpu_results = {}
 
     for rank in (0, 1):
@@ -412,9 +429,46 @@ print(json.dumps({
 
     note("Candidate two-stage inference passed")
 
+    # Run the identical workload used for the eager baseline.
+    benchmark_code = (
+        ROOT / "scripts/v2_benchmark_inference.py"
+    ).read_text()
+
+    note("Running SDPA benchmark: 2 warmups + 8 requests")
+
+    benchmark_output = kube(
+        "exec", "-i", "-n", NS, "qwen3-0",
+        "-c", "runtime", "--",
+        "python", "-", "sdpa",
+        input_text=benchmark_code,
+        timeout=300,
+    )
+
+    benchmark = json.loads(benchmark_output)
+
+    if benchmark["generated_token_counts"] != [64] * 8:
+        raise RuntimeError(
+            "SDPA generated token counts differ from baseline"
+        )
+
+    if (
+        benchmark["prompt_chars"] != 1019
+        or benchmark["max_new_tokens"] != 64
+        or benchmark["measured_requests"] != 8
+    ):
+        raise RuntimeError(
+            "SDPA benchmark workload does not match baseline"
+        )
+
+    note(
+        f"SDPA benchmark completed: "
+        f"E2E median={benchmark['median']['e2e_ms']} ms"
+    )
+
     return {
         "gpu": gpu_results,
         "inference": inference,
+        "benchmark": benchmark,
     }
 
 

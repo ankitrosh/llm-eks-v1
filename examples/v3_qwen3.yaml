@@ -1,0 +1,33 @@
+schema_version: 1
+
+model:
+  id: JunHowie/Qwen3-14B-GPTQ-Int8
+  num_layers: 40
+  dtype: bfloat16
+
+pipeline:
+  num_ranks: 2
+  partition: manual
+  stages:
+    - {rank: 0, start_layer: 0, end_layer: 20}
+    - {rank: 1, start_layer: 20, end_layer: 40}
+
+attention:
+  default:
+    implementation: model_native
+    backend: sdpa
+
+quantization:
+  backend: marlin
+
+cache:
+  prefix_enabled: true
+  max_mib_per_rank: 256
+
+runtime:
+  device: cuda
+  distributed_backend: nccl
+
+scheduler:
+  mode: sequential
+  max_active_requests: 1

@@ -1,0 +1,44 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+        REGISTRY=657173565477.dkr.ecr.us-east-2.amazonaws.com
+
+        aws ecr get-login-password --region us-east-2 |
+          docker login --username AWS \
+            --password-stdin "$REGISTRY"
+
+        test -s src/gpu/qwen3_stage_loader.py
+        test -s scripts/v2_gptq_layer_probe.py
+        test -s tests/fixtures/qwen3-32b-gptq/config.json
+        test -s tests/fixtures/qwen3-32b-gptq/model.safetensors.index.json
+
+        echo "PASS: Source and ECR authentication"
+
+  build:
+    commands:
+      - |
+        set -euo pipefail
+
+        IMAGE="657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:614e06a9697e62d147da55ccce13df4f115197d572dfe94df9667a576acc5650"
+
+        echo "========== RUN CPU GPTQ LAYER TEST =========="
+
+        docker run --rm \
+          --network none \
+          --platform linux/amd64 \
+          --mount "type=bind,source=$CODEBUILD_SRC_DIR/src/gpu/qwen3_stage_loader.py,target=/app/qwen3_stage_loader.py,readonly" \
+          --mount "type=bind,source=$CODEBUILD_SRC_DIR/scripts/v2_gptq_layer_probe.py,target=/app/v2_gptq_layer_probe.py,readonly" \
+          --mount "type=bind,source=$CODEBUILD_SRC_DIR/tests/fixtures/qwen3-32b-gptq,target=/tmp/gptq-metadata,readonly" \
+          --entrypoint python \
+          "$IMAGE" \
+          /app/v2_gptq_layer_probe.py \
+          --metadata-dir /tmp/gptq-metadata
+
+        echo "PASS: CPU GPTQ layer test completed"
