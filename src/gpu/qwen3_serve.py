@@ -649,7 +649,33 @@ def main():
             raise RuntimeError("GPU does not support BF16")
 
         LOG.info("Rank %s loading Qwen3 stage, split=%s", args.rank, args.split)
-        stage = Qwen3Stage(args.model_dir, args.rank, args.split).load()
+        from os import environ as _v3_environ
+
+        stage_impl = _v3_environ.get(
+            "LLM_STAGE_IMPL", "legacy"
+        ).strip().lower()
+
+        if stage_impl == "legacy":
+            stage = Qwen3Stage(
+                args.model_dir, args.rank, args.split
+            ).load()
+
+        elif stage_impl == "v3_adapter":
+            from llm_runtime.v3_stage_bridge import (
+                load_qwen3_stage_v3,
+            )
+
+            stage = load_qwen3_stage_v3(
+                args.model_dir,
+                args.rank,
+                args.split,
+            )
+
+        else:
+            raise ValueError(
+                f"Unsupported LLM_STAGE_IMPL: {stage_impl}"
+            )
+
         tokenizer = AutoTokenizer.from_pretrained(args.model_dir) if args.rank == 0 else None
         if tokenizer is not None and not isinstance(tokenizer.eos_token_id, int):
             raise RuntimeError("Expected one integer EOS token ID in Qwen3 tokenizer")
