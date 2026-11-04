@@ -4,7 +4,7 @@ set -euo pipefail
 REGION=us-east-2
 ACCOUNT=657173565477
 REPO=qwen3-14b-pipeline
-TAG=v3-plan-r1
+TAG=v3-plan-r2
 
 REGISTRY="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com"
 IMAGE="${REGISTRY}/${REPO}:${TAG}"

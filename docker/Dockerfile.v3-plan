@@ -1,29 +1,23 @@
-# Reuse the validated V2 GPTQ/Marlin + prefix-cache image.
 FROM 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:92c72a89d24febfbc6d31f36bb895d621298ca80b991596bd541b52c7b110856
 
 WORKDIR /app
 
-# Updated serving code and existing optimized Qwen3 loader.
 COPY src/gpu/qwen3_serve.py /app/qwen3_serve.py
 COPY src/gpu/qwen3_stage_loader.py /app/qwen3_stage_loader.py
-
-# Model-independent V3 framework modules.
 COPY src/llm_runtime/ /app/llm_runtime/
 
-# Compiled, statically validated execution plan.
 COPY infrastructure/plans/qwen3-v3-runtime.json \
      /app/v3/plans/qwen3-v3-runtime.json
 
-# The image defaults to legacy inference.
-# V3 is enabled explicitly by setting LLM_RUNTIME_PLAN.
+COPY infrastructure/plans/qwen3-v3-no-cache.json \
+     /app/v3/plans/qwen3-v3-no-cache.json
+
 ENV LLM_STAGE_IMPL=legacy
 
-# Build-time syntax, import, and plan-integrity checks.
 RUN python -m py_compile \
       /app/qwen3_serve.py \
       /app/qwen3_stage_loader.py \
       /app/llm_runtime/v3_plan_loader.py \
-      /app/llm_runtime/v3_stage_bridge.py \
-    && python -c "import json; from llm_runtime.v3_plan_loader import digest; p=json.load(open('/app/v3/plans/qwen3-v3-runtime.json')); assert p['plan_sha256'] == digest({k:v for k,v in p.items() if k != 'plan_sha256'}); print('PASS: V3 plan checksum')"
+      /app/llm_runtime/v3_stage_bridge.py
 
-# Inherit the verified V2 entrypoint.
+RUN python -c "import json; from llm_runtime.v3_plan_loader import digest; from pathlib import Path; paths=list(Path('/app/v3/plans').glob('*.json')); assert len(paths)==2; plans=[json.loads(p.read_text()) for p in paths]; assert all(p['plan_sha256']==digest({k:v for k,v in p.items() if k!='plan_sha256'}) for p in plans); assert {p['runtime_environment']['LLM_PREFIX_CACHE_ENABLED'] for p in plans}=={'0','1'}; print('PASS: Both V3 plans verified')"

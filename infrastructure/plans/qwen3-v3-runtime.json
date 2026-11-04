@@ -3,7 +3,7 @@
   "status": "STATICALLY_VALIDATED_NOT_EXECUTED",
   "model": {
     "id": "JunHowie/Qwen3-14B-GPTQ-Int8",
-    "revision": "main",
+    "revision": "9b876cd2f6f2c870afd18bb5b458fb38ab3e3e00",
     "type": "qwen3",
     "layers": 40,
     "dtype": "bfloat16",
@@ -42,5 +42,5 @@
     "NCCL inference correctness not tested",
     "Runtime plan not connected to serving launcher yet"
   ],
-  "plan_sha256": "75799170c5798f10b1fe2555252315f346066ab01d5be74fb9fabeae12281bfa"
+  "plan_sha256": "cb602eeb21eb4309b1521197b6d5e463433f94c06c2143433b939e9b0d098e81"
 }
