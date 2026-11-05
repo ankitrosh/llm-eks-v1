@@ -2,6 +2,10 @@
 
 import tempfile
 
+import yaml
+from pathlib import Path
+from llm_runtime.v3_attention_plan import resolve_attention_plan
+
 import torch
 from transformers import GPT2Config, GPT2LMHeadModel
 from transformers.cache_utils import DynamicCache
@@ -27,10 +31,27 @@ config = GPT2Config(
     use_cache=True,
 )
 
+manifest = yaml.safe_load(
+    Path("examples/v3_gpt2_extension.yaml").read_text()
+)
+
+resolved_plan = resolve_attention_plan(manifest)
+stage_rows = resolved_plan["stages"]
+
+assert len(stage_rows) == 2
+assert manifest["model"]["num_layers"] == 4
+
 specs = [
-    StageSpec(0, 0, 2, True, False),
-    StageSpec(1, 2, 4, False, True),
+    StageSpec(
+        rank=stage["rank"],
+        start_layer=stage["start_layer"],
+        end_layer=stage["end_layer"],
+        first_stage=(i == 0),
+        final_stage=(i == len(stage_rows) - 1),
+    )
+    for i, stage in enumerate(stage_rows)
 ]
+
 
 with tempfile.TemporaryDirectory() as tmp:
     GPT2LMHeadModel(config).eval().save_pretrained(tmp)
@@ -53,40 +74,7 @@ with tempfile.TemporaryDirectory() as tmp:
         for spec in specs
     ]
 
-    plan = {
-        "stages": [
-            {
-                "rank": 0,
-                "attention": [
-                    {
-                        "start_layer": 1,
-                        "end_layer": 2,
-                        "implementation": "custom",
-                        "plugin": (
-                            "experiments.v3_gpt2_extension:"
-                            "IdentityAttention"
-                        ),
-                        "options": {},
-                    }
-                ],
-            },
-            {
-                "rank": 1,
-                "attention": [
-                    {
-                        "start_layer": 2,
-                        "end_layer": 3,
-                        "implementation": "custom",
-                        "plugin": (
-                            "experiments.v3_gpt2_extension:"
-                            "IdentityAttention"
-                        ),
-                        "options": {},
-                    }
-                ],
-            },
-        ]
-    }
+    plan = resolved_plan
 
     for stage in stages:
         install_attention_extensions(

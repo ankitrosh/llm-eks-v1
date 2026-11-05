@@ -3,6 +3,10 @@
 import copy
 import tempfile
 
+import yaml
+from pathlib import Path
+from llm_runtime.v3_attention_plan import resolve_attention_plan
+
 import torch
 from transformers import GPT2Config, GPT2LMHeadModel
 
@@ -36,22 +40,27 @@ config = GPT2Config(
     use_cache=False,
 )
 
+manifest = yaml.safe_load(
+    Path("examples/v3_gpt2_extension.yaml").read_text()
+)
+
+resolved_plan = resolve_attention_plan(manifest)
+stage_rows = resolved_plan["stages"]
+
+assert len(stage_rows) == 2
+assert manifest["model"]["num_layers"] == 4
+
 specs = [
     StageSpec(
-        rank=0,
-        start_layer=0,
-        end_layer=2,
-        first_stage=True,
-        final_stage=False,
-    ),
-    StageSpec(
-        rank=1,
-        start_layer=2,
-        end_layer=4,
-        first_stage=False,
-        final_stage=True,
-    ),
+        rank=stage["rank"],
+        start_layer=stage["start_layer"],
+        end_layer=stage["end_layer"],
+        first_stage=(i == 0),
+        final_stage=(i == len(stage_rows) - 1),
+    )
+    for i, stage in enumerate(stage_rows)
 ]
+
 
 tokens = torch.tensor(
     [[4, 12, 15, 31, 8, 26]],
@@ -135,50 +144,7 @@ with tempfile.TemporaryDirectory() as tmp:
     untouched0 = left.blocks["0"].attn
     untouched3 = right.blocks["3"].attn
 
-    plan = {
-        "stages": [
-            {
-                "rank": 0,
-                "attention": [
-                    {
-                        "start_layer": 0,
-                        "end_layer": 1,
-                        "implementation": "model_native",
-                    },
-                    {
-                        "start_layer": 1,
-                        "end_layer": 2,
-                        "implementation": "custom",
-                        "plugin": (
-                            "experiments.v3_gpt2_extension:"
-                            "IdentityAttention"
-                        ),
-                        "options": {},
-                    },
-                ],
-            },
-            {
-                "rank": 1,
-                "attention": [
-                    {
-                        "start_layer": 2,
-                        "end_layer": 3,
-                        "implementation": "custom",
-                        "plugin": (
-                            "experiments.v3_gpt2_extension:"
-                            "IdentityAttention"
-                        ),
-                        "options": {},
-                    },
-                    {
-                        "start_layer": 3,
-                        "end_layer": 4,
-                        "implementation": "model_native",
-                    },
-                ],
-            },
-        ],
-    }
+    plan = resolved_plan
 
     assert len(collect_attention_plugins(plan)) == 2
 
