@@ -84,6 +84,7 @@ class PipelineScheduler:
         max_active_requests: int = 4,
         stop_fn: Callable[[Any], bool] | None = None,
         trace_limit: int = 2048,
+        on_request_end: Callable[[int], None] | None = None,
     ):
         if not stage_fns or not all(callable(f) for f in stage_fns):
             raise ValueError("At least one callable stage required")
@@ -96,6 +97,7 @@ class PipelineScheduler:
         self._sample = sample_fn
         self._stop = stop_fn
         self._capacity = max_active_requests
+        self._on_request_end = on_request_end
 
         self._queues = [deque() for _ in stage_fns]
         self._caches = [{} for _ in stage_fns]
@@ -262,6 +264,8 @@ class PipelineScheduler:
         """Requires scheduler lock and no active stage for rid."""
         assert rid not in self._running
 
+        if rid not in self._requests:
+            return
         self._requests.pop(rid, None)
 
         for queue in self._queues:
@@ -275,6 +279,8 @@ class PipelineScheduler:
         for cache in self._caches:
             cache.pop(rid, None)
 
+        if self._on_request_end is not None:
+            self._on_request_end(rid)
         self._cv.notify_all()
 
     def _on_done(self, rid, future):

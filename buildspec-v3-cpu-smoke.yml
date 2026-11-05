@@ -20,7 +20,8 @@ phases:
           v3_cpu_reference_smoke.py \
           v3_cpu_extension_integration.py \
           v3_cpu_cache_integration.py \
-          v3_cpu_scheduler_integration.py
+          v3_cpu_scheduler_integration.py \
+          v3_cpu_process_gpt2_integration.py
         do
           echo "========== RUN $SCRIPT =========="
 
@@ -36,4 +37,7 @@ phases:
 
         echo "========== RUN V3 scheduler lifecycle tests =========="
         docker run --rm --entrypoint python --network none -v "$CODEBUILD_SRC_DIR:/workspace:ro" -w /workspace -e PYTHONPATH=/workspace/src:/workspace "$IMAGE" -m unittest discover -s tests -p 'test_v3_pipeline_scheduler*.py' -v
+        echo "========== RUN PROCESS TRANSPORT UNIT TESTS =========="
+        docker run --rm --entrypoint python --network none -v "$CODEBUILD_SRC_DIR:/workspace:ro" -w /workspace -e PYTHONPATH=/workspace/src:/workspace "$IMAGE" -m unittest discover -s tests -p 'test_v3_process_transport.py' -v
+
         echo "PASS: V3.2.4 scheduler reliability regressions"
