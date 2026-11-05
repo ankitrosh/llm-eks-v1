@@ -1,0 +1,34 @@
+version: 0.2
+
+phases:
+  build:
+    commands:
+      - |
+        set -eu
+
+        REGION=us-east-2
+        ACCOUNT=657173565477
+        REGISTRY="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
+        IMAGE="$REGISTRY/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747"
+
+        aws ecr get-login-password --region "$REGION" |
+          docker login --username AWS --password-stdin "$REGISTRY"
+
+        docker pull "$IMAGE"
+
+        for SCRIPT in \
+          v3_cpu_reference_smoke.py \
+          v3_cpu_extension_integration.py \
+          v3_cpu_cache_integration.py
+        do
+          echo "========== RUN $SCRIPT =========="
+
+          docker run --rm \
+            --entrypoint python \
+            --network none \
+            -v "$CODEBUILD_SRC_DIR:/workspace:ro" \
+            -w /workspace \
+            -e PYTHONPATH=/workspace/src:/workspace \
+            "$IMAGE" \
+            "/workspace/scripts/$SCRIPT"
+        done
