@@ -18,12 +18,21 @@ class SchedulerBusy(RuntimeError):
     pass
 
 
+class FatalStageError(RuntimeError):
+    """Irrecoverable stage or transport failure; restart the pipeline."""
+
+
+class PipelineUnhealthyError(RuntimeError):
+    """Reject all new work after a fatal stage error."""
+
+
 @dataclass(frozen=True)
 class StageTask:
     request_id: int
     step: int
     position: int
     payload: Any
+    enqueued_at: float = field(default_factory=monotonic, compare=False)
 
 
 @dataclass
@@ -56,6 +65,7 @@ class _Request:
     deadline: float | None
     tokens: list[Any] = field(default_factory=list)
     expired: bool = False
+    submitted_at: float = field(default_factory=monotonic)
 
 
 class PipelineScheduler:
@@ -93,6 +103,23 @@ class PipelineScheduler:
         self._requests = {}
         self._ids = count(1)
         self._accepting = True
+        self._fatal_error = None
+        self._started_at = monotonic()
+        self._stats = {
+            "submitted_requests": 0,
+            "completed_requests": 0,
+            "failed_requests": 0,
+            "cancelled_requests": 0,
+            "timed_out_requests": 0,
+            "generated_tokens": 0,
+            "first_tokens": 0,
+            "total_latency_s": 0.0,
+            "total_ttft_s": 0.0,
+        }
+        self._stage_stats = [
+            {"tasks": 0, "queue_wait_s": 0.0, "run_s": 0.0}
+            for _ in stage_fns
+        ]
         self._cv = Condition()
         self._events = deque(maxlen=trace_limit)
 
@@ -130,6 +157,8 @@ class PipelineScheduler:
             raise ValueError("timeout_s must be positive")
 
         with self._cv:
+            if self._fatal_error is not None:
+                raise PipelineUnhealthyError(self._fatal_error)
             if not self._accepting:
                 raise RuntimeError("Scheduler closed")
 
@@ -159,6 +188,7 @@ class PipelineScheduler:
             self._queues[0].append(
                 StageTask(rid, 0, 0, prompt)
             )
+            self._stats["submitted_requests"] += 1
             self._cv.notify_all()
             return future
 
@@ -176,7 +206,46 @@ class PipelineScheduler:
                     map(len, self._caches)
                 ),
                 "events": tuple(self._events),
+                "healthy": self._fatal_error is None,
+                "fatal_error": self._fatal_error,
             }
+
+    def metrics(self):
+        """Cumulative counters; TTFT = first sampled token."""
+        with self._cv:
+            m = dict(self._stats)
+            m["healthy"] = self._fatal_error is None
+            m["fatal_error"] = self._fatal_error
+            m["active"] = len(self._requests)
+
+            m["tokens_per_second"] = (
+                m["generated_tokens"] /
+                max(monotonic() - self._started_at, 1e-9)
+            )
+
+            m["avg_latency_ms"] = (
+                1000 * m["total_latency_s"] / m["completed_requests"]
+                if m["completed_requests"] else None
+            )
+
+            m["avg_ttft_ms"] = (
+                1000 * m["total_ttft_s"] / m["first_tokens"]
+                if m["first_tokens"] else None
+            )
+
+            m["stages"] = tuple({
+                "tasks": v["tasks"],
+                "avg_queue_wait_ms": (
+                    1000 * v["queue_wait_s"] / v["tasks"]
+                    if v["tasks"] else None
+                ),
+                "avg_execution_ms": (
+                    1000 * v["run_s"] / v["tasks"]
+                    if v["tasks"] else None
+                ),
+            } for v in self._stage_stats)
+
+            return m
 
     def _event(self, rank, task, kind):
         self._events.append(
@@ -211,6 +280,9 @@ class PipelineScheduler:
     def _on_done(self, rid, future):
         if future.cancelled():
             with self._cv:
+                state = self._requests.get(rid)
+                if state is not None and not state.expired:
+                    self._stats["cancelled_requests"] += 1
                 if (
                     rid in self._requests
                     and rid not in self._running
@@ -240,6 +312,7 @@ class PipelineScheduler:
 
                     if state.deadline <= now:
                         state.expired = True
+                        self._stats["timed_out_requests"] += 1
                         expired.append(state.future)
 
                         if state.request_id not in self._running:
@@ -270,6 +343,23 @@ class PipelineScheduler:
                     # Cancellation/completion won the race.
                     pass
 
+    def _trip_fatal(self, rank, error):
+        """Fail requests but preserve caches of running stage code."""
+        self._fatal_error = f"stage {rank}: {error}"
+        self._accepting = False
+        pending = []
+
+        for state in list(self._requests.values()):
+            if not state.expired and not state.future.done():
+                pending.append(state.future)
+                self._stats["failed_requests"] += 1
+
+            if state.request_id not in self._running:
+                self._forget(state.request_id)
+
+        self._cv.notify_all()
+        return pending
+
     def _worker(self, rank):
         while True:
             with self._cv:
@@ -287,7 +377,7 @@ class PipelineScheduler:
                 if (
                     state is None
                     or state.expired
-                    or state.future.cancelled()
+                    or state.future.done() or self._fatal_error is not None
                 ):
                     if (
                         state is not None
@@ -298,6 +388,10 @@ class PipelineScheduler:
 
                 self._running[rank] = task.request_id
                 cache = self._caches[rank].get(task.request_id)
+                started = monotonic()
+                self._stage_stats[rank]["queue_wait_s"] += max(
+                    0.0, started - task.enqueued_at
+                )
                 self._event(rank, task, "start")
 
             error = None
@@ -321,9 +415,13 @@ class PipelineScheduler:
                 error = exc
 
             completion = None
-
+            failed_futures = []
             with self._cv:
                 self._running[rank] = None
+                self._stage_stats[rank]["tasks"] += 1
+                self._stage_stats[rank]["run_s"] += (
+                    monotonic() - started
+                )
                 self._event(
                     rank,
                     task,
@@ -332,14 +430,19 @@ class PipelineScheduler:
 
                 state = self._requests.get(task.request_id)
 
-                if state is None:
+                if isinstance(error, FatalStageError) and self._fatal_error is None:
+                    failed_futures = self._trip_fatal(rank, error)
+                    if task.request_id in self._requests:
+                        self._forget(task.request_id)
+                elif state is None:
                     pass
 
-                elif state.expired or state.future.cancelled():
+                elif state.expired or state.future.done() or self._fatal_error is not None:
                     self._forget(task.request_id)
 
                 elif error is not None:
                     completion = (state.future, error, True)
+                    self._stats["failed_requests"] += 1
                     self._forget(task.request_id)
 
                 else:
@@ -358,6 +461,13 @@ class PipelineScheduler:
                         )
                     else:
                         state.tokens.append(sampled)
+                        self._stats["generated_tokens"] += 1
+
+                        if len(state.tokens) == 1:
+                            self._stats["first_tokens"] += 1
+                            self._stats["total_ttft_s"] += (
+                                monotonic() - state.submitted_at
+                            )
 
                         if (
                             should_stop
@@ -372,6 +482,10 @@ class PipelineScheduler:
                                 ),
                                 False,
                             )
+                            self._stats["completed_requests"] += 1
+                            self._stats["total_latency_s"] += (
+                                monotonic() - state.submitted_at
+                            )
                             self._forget(task.request_id)
                         else:
                             self._queues[0].append(
@@ -384,6 +498,14 @@ class PipelineScheduler:
                             )
 
                 self._cv.notify_all()
+
+            for future in failed_futures:
+                try:
+                    future.set_exception(
+                        PipelineUnhealthyError(self._fatal_error)
+                    )
+                except InvalidStateError:
+                    pass
 
             if completion is not None:
                 future, value, is_error = completion
