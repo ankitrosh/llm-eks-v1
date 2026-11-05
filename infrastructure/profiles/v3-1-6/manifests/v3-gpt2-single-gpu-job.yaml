@@ -1,0 +1,81 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v3-gpt2-single-gpu
+  namespace: llm
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        pool: gpu
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: test
+        image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+        command:
+        - python
+        - /workspace/v3_cuda_extension_integration.py
+        env:
+        - name: PYTHONPATH
+          value: /workspace/src:/workspace:/app:/app/v3
+        resources:
+          requests:
+            nvidia.com/gpu: '1'
+          limits:
+            nvidia.com/gpu: '1'
+        volumeMounts:
+        - name: test-code
+          mountPath: /workspace
+          readOnly: true
+      volumes:
+      - name: test-code
+        projected:
+          sources:
+          - configMap:
+              name: v3-gpt2-gpu-test
+              items:
+              - key: runner
+                path: v3_cuda_extension_integration.py
+              - key: plugin
+                path: experiments/v3_gpt2_extension.py
+              - key: init
+                path: experiments/__init__.py
+              - key: manifest
+                path: v3_gpt2_extension.yaml
+          - configMap:
+              name: v3-gpt2-framework-src
+              items:
+              - key: __init__.py
+                path: src/llm_runtime/__init__.py
+              - key: model_metadata.py
+                path: src/llm_runtime/model_metadata.py
+              - key: optimization_registry.py
+                path: src/llm_runtime/optimization_registry.py
+              - key: runtime_discovery.py
+                path: src/llm_runtime/runtime_discovery.py
+              - key: v3_adapter_registry.py
+                path: src/llm_runtime/v3_adapter_registry.py
+              - key: v3_attention_install.py
+                path: src/llm_runtime/v3_attention_install.py
+              - key: v3_attention_plan.py
+                path: src/llm_runtime/v3_attention_plan.py
+              - key: v3_extension_contracts.py
+                path: src/llm_runtime/v3_extension_contracts.py
+              - key: v3_manifest.py
+                path: src/llm_runtime/v3_manifest.py
+              - key: v3_model_inspector.py
+                path: src/llm_runtime/v3_model_inspector.py
+              - key: v3_plan_loader.py
+                path: src/llm_runtime/v3_plan_loader.py
+              - key: v3_plugin_registry.py
+                path: src/llm_runtime/v3_plugin_registry.py
+              - key: v3_qwen3_adapter.py
+                path: src/llm_runtime/v3_qwen3_adapter.py
+              - key: v3_runtime_plan.py
+                path: src/llm_runtime/v3_runtime_plan.py
+              - key: v3_stage_bridge.py
+                path: src/llm_runtime/v3_stage_bridge.py
