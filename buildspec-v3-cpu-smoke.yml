@@ -40,4 +40,8 @@ phases:
         echo "========== RUN PROCESS TRANSPORT UNIT TESTS =========="
         docker run --rm --entrypoint python --network none -v "$CODEBUILD_SRC_DIR:/workspace:ro" -w /workspace -e PYTHONPATH=/workspace/src:/workspace "$IMAGE" -m unittest discover -s tests -p 'test_v3_process_transport.py' -v
 
+        echo "========== RUN TWO-RANK GLOO TRANSPORT =========="
+        docker run --rm           --entrypoint python           --network none           -v "$CODEBUILD_SRC_DIR:/workspace:ro"           -w /workspace           -e PYTHONPATH=/workspace/src:/workspace           -e GLOO_SOCKET_IFNAME=lo \
+          -e V3_CTRL_PORT=29619           "$IMAGE"           -m torch.distributed.run           --nnodes=1 --master-addr=127.0.0.1 --master-port=29500           --nproc-per-node=2           /workspace/scripts/v3_gloo_rank_transport_smoke.py
+
         echo "PASS: V3.2.4 scheduler reliability regressions"
