@@ -1,0 +1,100 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: v3-nccl-ordered-headless
+  namespace: llm
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: v3-nccl-ordered
+  ports:
+  - name: rendezvous
+    port: 29628
+    targetPort: 29628
+  - name: control
+    port: 29629
+    targetPort: 29629
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v3-nccl-ordered
+  namespace: llm
+spec:
+  completions: 2
+  parallelism: 2
+  completionMode: Indexed
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app: v3-nccl-ordered
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 20
+      subdomain: v3-nccl-ordered-headless
+      nodeSelector:
+        pool: gpu
+      tolerations:
+      - operator: Exists
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: v3-nccl-ordered
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: runtime
+        image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+        command:
+        - python
+        - -u
+        - /workspace/v3_nccl_rank_transport_smoke.py
+        env:
+        - name: PYTHONPATH
+          value: /workspace/src:/workspace:/app:/app/v3
+        - name: RANK
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+        - name: WORLD_SIZE
+          value: '2'
+        - name: MASTER_ADDR
+          value: v3-nccl-ordered-0.v3-nccl-ordered-headless.llm.svc.cluster.local
+        - name: MASTER_PORT
+          value: '29628'
+        - name: V3_CTRL_PORT
+          value: '29629'
+        - name: NCCL_SOCKET_IFNAME
+          value: eth0
+        - name: NCCL_IB_DISABLE
+          value: '1'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        resources:
+          requests:
+            nvidia.com/gpu: '1'
+          limits:
+            nvidia.com/gpu: '1'
+        volumeMounts:
+        - name: test-code
+          mountPath: /workspace
+          readOnly: true
+      volumes:
+      - name: test-code
+        projected:
+          sources:
+          - configMap:
+              name: v3-nccl-ordered-code
+              items:
+              - key: runner
+                path: v3_nccl_rank_transport_smoke.py
+              - key: transport
+                path: src/llm_runtime/v3_ordered_rank_transport.py
+              - key: scheduler
+                path: src/llm_runtime/v3_pipeline_scheduler.py
+              - key: init
+                path: src/llm_runtime/__init__.py
