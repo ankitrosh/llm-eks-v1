@@ -1,0 +1,25 @@
+{
+  "provider": {
+    "factory_path": "llm_runtime.providers.v3_qwen3_stage_only_factory:Qwen3StageOnlyFactory",
+    "kwargs": {
+      "checkpoint_dir": "/models/qwen3-14b",
+      "device": "cuda:0",
+      "dtype": "bfloat16",
+      "split_at": 20
+    }
+  },
+  "tokenizer_path": "/models/qwen3-14b",
+  "pipeline": {
+    "world_size": 2,
+    "max_active_requests": 4,
+    "max_pending": 4
+  },
+  "generation": {
+    "prompts": [
+      "Explain pipeline parallelism in language model inference.",
+      "Compare KV caching with recomputing attention."
+    ],
+    "max_new_tokens": 64,
+    "warmup_new_tokens": 8
+  }
+}
