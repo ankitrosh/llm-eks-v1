@@ -21,6 +21,9 @@ from llm_runtime.v3_1_checkpoint_profile import (
 from llm_runtime.v3_1_gptq_int8_inspection import (
     resolve_gptq_int8_plan,
 )
+from llm_runtime.v3_1_custom_quantization import (
+    resolve_custom_quantized_plan,
+)
 from llm_runtime.v3_1_quantization_api import (
     QuantizationProfile,
 )
@@ -142,7 +145,7 @@ def compile_v31_launch_spec(
 
         provider = selector.get("provider")
 
-        if provider != "gptq":
+        if provider not in ("gptq", "custom"):
             raise ValueError(
                 f"Quantization provider {provider!r} is not "
                 "yet supported by the unified launch compiler"
@@ -160,10 +163,16 @@ def compile_v31_launch_spec(
                 "Quantization options must be an object"
             )
 
-        plan, profile = resolve_gptq_int8_plan(
-            config,
-            gpu_memory_gib=gpu_memory_gib,
-        )
+        if provider == "gptq":
+            plan, profile = resolve_gptq_int8_plan(
+                config,
+                gpu_memory_gib=gpu_memory_gib,
+            )
+        else:
+            plan, profile = resolve_custom_quantized_plan(
+                config,
+                gpu_memory_gib=gpu_memory_gib,
+            )
 
         quantization = {
             "provider": provider,
@@ -173,6 +182,10 @@ def compile_v31_launch_spec(
             "execution_mode": profile.execution_mode,
             "options": dict(options),
         }
+
+        if provider == "custom":
+            quantization["factory"] = selector["factory"]
+            quantization["implementation"] = profile.provider
 
     elif "checkpoint_dir" in model:
         plan, profile = resolve_v31_checkpoint_config(

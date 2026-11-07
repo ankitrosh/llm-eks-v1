@@ -308,7 +308,7 @@ def test_unknown_quantization_provider_fails_closed(tmp_path):
 
     config["model"]["quantization"][
         "provider"
-    ] = "custom"
+    ] = "unsupported-method"
 
     with pytest.raises(ValueError, match="not yet supported"):
         compile_v31_launch_spec(config)
