@@ -186,3 +186,141 @@ def test_infeasible_memory_rejected(tmp_path):
 
     with pytest.raises(ValueError):
         resolve_gptq_int8_plan(config)
+
+
+def test_unified_gptq_launch_spec(tmp_path):
+    from llm_runtime.v3_1_launch_spec import (
+        compile_v31_launch_spec,
+    )
+
+    make_checkpoint(tmp_path)
+
+    config = make_config(tmp_path, ranks=3)
+    original = copy.deepcopy(config)
+
+    spec = compile_v31_launch_spec(config)
+
+    assert spec.world_size == 3
+    assert spec.layout.boundaries[0] == 0
+    assert spec.layout.boundaries[-1] == 4
+    assert len(spec.layout.boundaries) == 4
+
+    data = json.loads(json.dumps(spec.as_dict()))
+
+    assert data["quantization"]["provider"] == "gptq"
+    assert data["quantization"]["bits"] == 8
+    assert data["quantization"]["format"] == "gptq"
+
+    assert (
+        data["checkpoint_profile"]["layer_storage_bytes"]
+        == [368] * 4
+    )
+
+    for rank in range(3):
+        assignment = spec.for_rank(rank)
+
+        assert assignment["quantization"]["bits"] == 8
+        assert (
+            assignment["start_layer"]
+            == spec.layout.boundaries[rank]
+        )
+        assert (
+            assignment["end_layer"]
+            == spec.layout.boundaries[rank + 1]
+        )
+        assert (
+            assignment["plan_sha256"]
+            == spec.plan_sha256
+        )
+
+    assert config == original
+
+
+def test_gptq_launch_digest_is_deterministic(tmp_path):
+    from llm_runtime.v3_1_launch_spec import (
+        compile_v31_launch_spec,
+    )
+
+    make_checkpoint(tmp_path)
+    config = make_config(tmp_path)
+
+    first = compile_v31_launch_spec(config)
+    second = compile_v31_launch_spec(config)
+
+    assert first.plan_sha256 == second.plan_sha256
+    assert first.layout.boundaries == second.layout.boundaries
+
+
+def test_gptq_options_change_launch_digest(tmp_path):
+    from llm_runtime.v3_1_launch_spec import (
+        compile_v31_launch_spec,
+    )
+
+    make_checkpoint(tmp_path)
+    config = make_config(tmp_path)
+
+    first = compile_v31_launch_spec(config)
+
+    changed = copy.deepcopy(config)
+    changed["model"]["quantization"]["options"][
+        "implementation"
+    ] = "candidate-a"
+
+    second = compile_v31_launch_spec(changed)
+
+    assert first.layout.boundaries == second.layout.boundaries
+    assert first.plan_sha256 != second.plan_sha256
+
+
+def test_gptq_format_changes_launch_digest(tmp_path):
+    from llm_runtime.v3_1_launch_spec import (
+        compile_v31_launch_spec,
+    )
+
+    make_checkpoint(tmp_path)
+
+    config = make_config(tmp_path)
+    original = compile_v31_launch_spec(config)
+
+    path = tmp_path / "config.json"
+    checkpoint_config = json.loads(path.read_text())
+
+    checkpoint_config["quantization_config"][
+        "format"
+    ] = "gptq_v2"
+
+    path.write_text(json.dumps(checkpoint_config))
+
+    changed = compile_v31_launch_spec(config)
+
+    assert original.layout.boundaries == changed.layout.boundaries
+    assert original.plan_sha256 != changed.plan_sha256
+    assert changed.quantization["format"] == "gptq_v2"
+
+
+def test_unknown_quantization_provider_fails_closed(tmp_path):
+    from llm_runtime.v3_1_launch_spec import (
+        compile_v31_launch_spec,
+    )
+
+    make_checkpoint(tmp_path)
+    config = make_config(tmp_path)
+
+    config["model"]["quantization"][
+        "provider"
+    ] = "custom"
+
+    with pytest.raises(ValueError, match="not yet supported"):
+        compile_v31_launch_spec(config)
+
+
+def test_quantized_launch_requires_checkpoint(tmp_path):
+    from llm_runtime.v3_1_launch_spec import (
+        compile_v31_launch_spec,
+    )
+
+    config = make_config(tmp_path)
+    del config["model"]["checkpoint_dir"]
+
+    with pytest.raises(ValueError, match="checkpoint_dir"):
+        compile_v31_launch_spec(config)

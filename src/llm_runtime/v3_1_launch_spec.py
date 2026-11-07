@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from llm_runtime.v3_1_runtime_config import (
     V31ResolvedPlan,
@@ -17,6 +17,12 @@ from llm_runtime.v3_1_runtime_config import (
 )
 from llm_runtime.v3_1_checkpoint_profile import (
     resolve_v31_checkpoint_config,
+)
+from llm_runtime.v3_1_gptq_int8_inspection import (
+    resolve_gptq_int8_plan,
+)
+from llm_runtime.v3_1_quantization_api import (
+    QuantizationProfile,
 )
 
 
@@ -30,6 +36,7 @@ class V31LaunchSpec:
     plan: V31ResolvedPlan
     plan_sha256: str
     checkpoint_profile: object | None = None
+    quantization: dict | None = None
 
     @property
     def layout(self):
@@ -46,7 +53,7 @@ class V31LaunchSpec:
 
         placement = self.plan.placements[rank]
 
-        return {
+        result = {
             "rank": rank,
             "world_size": self.world_size,
             "start_layer": placement.start,
@@ -60,6 +67,11 @@ class V31LaunchSpec:
             ),
             "plan_sha256": self.plan_sha256,
         }
+
+        if self.quantization is not None:
+            result["quantization"] = dict(self.quantization)
+
+        return result
 
     def as_dict(self):
         result = {
@@ -81,9 +93,20 @@ class V31LaunchSpec:
         }
 
         if self.checkpoint_profile is not None:
-            result["checkpoint_profile"] = (
-                self.checkpoint_profile.as_dict()
-            )
+            if isinstance(
+                self.checkpoint_profile,
+                QuantizationProfile,
+            ):
+                result["checkpoint_profile"] = asdict(
+                    self.checkpoint_profile
+                )
+            else:
+                result["checkpoint_profile"] = (
+                    self.checkpoint_profile.as_dict()
+                )
+
+        if self.quantization is not None:
+            result["quantization"] = dict(self.quantization)
 
         return result
 
@@ -107,7 +130,51 @@ def compile_v31_launch_spec(
     if not isinstance(model, Mapping):
         raise ValueError("model must be an object")
 
-    if "checkpoint_dir" in model:
+    quantization = None
+
+    if "quantization" in model:
+        selector = model["quantization"]
+
+        if not isinstance(selector, Mapping):
+            raise ValueError(
+                "model.quantization must be an object"
+            )
+
+        provider = selector.get("provider")
+
+        if provider != "gptq":
+            raise ValueError(
+                f"Quantization provider {provider!r} is not "
+                "yet supported by the unified launch compiler"
+            )
+
+        if "checkpoint_dir" not in model:
+            raise ValueError(
+                "Quantized launch requires checkpoint_dir"
+            )
+
+        options = selector.get("options", {})
+
+        if not isinstance(options, Mapping):
+            raise ValueError(
+                "Quantization options must be an object"
+            )
+
+        plan, profile = resolve_gptq_int8_plan(
+            config,
+            gpu_memory_gib=gpu_memory_gib,
+        )
+
+        quantization = {
+            "provider": provider,
+            "format": profile.format_id,
+            "bits": profile.bits,
+            "group_size": profile.group_size,
+            "execution_mode": profile.execution_mode,
+            "options": dict(options),
+        }
+
+    elif "checkpoint_dir" in model:
         plan, profile = resolve_v31_checkpoint_config(
             config,
             gpu_memory_gib=gpu_memory_gib,
@@ -149,6 +216,12 @@ def compile_v31_launch_spec(
         "plan": plan.as_dict(),
     }
 
+    if quantization is not None:
+        identity["quantization"] = {
+            **quantization,
+            "checkpoint_profile": asdict(profile),
+        }
+
     canonical = json.dumps(
         identity,
         sort_keys=True,
@@ -162,4 +235,5 @@ def compile_v31_launch_spec(
         plan=plan,
         plan_sha256=digest,
         checkpoint_profile=profile,
+        quantization=quantization,
     )
