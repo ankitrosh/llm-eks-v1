@@ -1,0 +1,38 @@
+schema_version: 1
+
+model:
+  id: local/tiny-gpt2-validation
+  num_layers: 4
+  dtype: float32
+
+pipeline:
+  num_ranks: 2
+  partition: manual
+  stages:
+    - {rank: 0, start_layer: 0, end_layer: 2}
+    - {rank: 1, start_layer: 2, end_layer: 4}
+
+attention:
+  default:
+    implementation: model_native
+    backend: eager
+
+  overrides:
+    - layers: [1, 2]
+      implementation: custom
+      backend: eager
+      plugin: experiments.v3_gpt2_extension:IdentityAttention
+      options: {}
+
+runtime:
+  device: cpu
+  distributed_backend: gloo
+
+scheduler:
+  mode: sequential
+  max_active_requests: 1
+  batching:
+    enabled: false
+
+deployment:
+  platform: local

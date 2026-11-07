@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: v3-gpt2-nccl-concurrent-headless
+  namespace: llm
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: v3-gpt2-nccl-concurrent
+  ports:
+  - name: rendezvous
+    port: 29638
+    targetPort: 29638
+  - name: control
+    port: 29639
+    targetPort: 29639
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v3-gpt2-nccl-concurrent
+  namespace: llm
+spec:
+  completions: 2
+  parallelism: 2
+  completionMode: Indexed
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app: v3-gpt2-nccl-concurrent
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 20
+      subdomain: v3-gpt2-nccl-concurrent-headless
+      nodeSelector:
+        pool: gpu
+      tolerations:
+      - operator: Exists
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: v3-gpt2-nccl-concurrent
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: runtime
+        image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+        command:
+        - python
+        - -u
+        - /workspace/v3_nccl_gpt2_integration.py
+        env:
+        - name: PYTHONPATH
+          value: /workspace/src:/workspace:/app:/app/v3
+        - name: RANK
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+        - name: WORLD_SIZE
+          value: '2'
+        - name: MASTER_ADDR
+          value: v3-gpt2-nccl-concurrent-0.v3-gpt2-nccl-concurrent-headless.llm.svc.cluster.local
+        - name: MASTER_PORT
+          value: '29638'
+        - name: V3_CTRL_PORT
+          value: '29639'
+        - name: NCCL_SOCKET_IFNAME
+          value: eth0
+        - name: NCCL_IB_DISABLE
+          value: '1'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        resources:
+          requests:
+            nvidia.com/gpu: '1'
+            memory: 2Gi
+          limits:
+            nvidia.com/gpu: '1'
+            memory: 6Gi
+        volumeMounts:
+        - name: test-code
+          mountPath: /workspace
+          readOnly: true
+        - name: v3-gpt2-shm
+          mountPath: /dev/shm
+      volumes:
+      - name: test-code
+        projected:
+          sources:
+          - configMap:
+              name: v3-gpt2-nccl-code
+              items:
+              - key: runner
+                path: v3_nccl_gpt2_integration.py
+              - key: manifest
+                path: examples/v3_gpt2_extension_nccl.yaml
+              - key: plugin
+                path: experiments/v3_gpt2_extension.py
+              - key: stage_provider
+                path: experiments/v3_gpt2_process_factory.py
+              - key: plugin_init
+                path: experiments/__init__.py
+              - key: module_00
+                path: src/llm_runtime/__init__.py
+              - key: module_01
+                path: src/llm_runtime/model_metadata.py
+              - key: module_02
+                path: src/llm_runtime/optimization_registry.py
+              - key: module_03
+                path: src/llm_runtime/runtime_discovery.py
+              - key: module_04
+                path: src/llm_runtime/v3_adapter_registry.py
+              - key: module_05
+                path: src/llm_runtime/v3_attention_install.py
+              - key: module_06
+                path: src/llm_runtime/v3_attention_plan.py
+              - key: module_07
+                path: src/llm_runtime/v3_extension_contracts.py
+              - key: module_08
+                path: src/llm_runtime/v3_manifest.py
+              - key: module_09
+                path: src/llm_runtime/v3_model_inspector.py
+              - key: module_10
+                path: src/llm_runtime/v3_plan_loader.py
+              - key: module_11
+                path: src/llm_runtime/v3_plugin_registry.py
+              - key: module_12
+                path: src/llm_runtime/v3_qwen3_adapter.py
+              - key: module_13
+                path: src/llm_runtime/v3_runtime_plan.py
+              - key: module_14
+                path: src/llm_runtime/v3_stage_bridge.py
+              - key: module_15
+                path: src/llm_runtime/v3_pipeline_scheduler.py
+              - key: module_16
+                path: src/llm_runtime/v3_execution_factory.py
+              - key: module_17
+                path: src/llm_runtime/v3_ordered_rank_transport.py
+      - name: v3-gpt2-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
