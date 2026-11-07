@@ -1,0 +1,261 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: v3-byom-qwen3-smoke-headless
+  namespace: llm
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: v3-byom-qwen3-smoke
+  ports:
+  - name: rendezvous
+    port: 29678
+    targetPort: 29678
+  - name: control
+    port: 29679
+    targetPort: 29679
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v3-byom-qwen3-smoke-rank0
+  namespace: llm
+spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 0
+  activeDeadlineSeconds: 2700
+  template:
+    metadata:
+      labels:
+        app: v3-byom-qwen3-smoke
+        rank: '0'
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 20
+      subdomain: v3-byom-qwen3-smoke-headless
+      nodeSelector:
+        pool: gpu
+      tolerations:
+      - operator: Exists
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: v3-byom-qwen3-smoke
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: runtime
+        image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+        command:
+        - python
+        - -u
+        - /workspace/scripts/v3_generic_nccl_runner.py
+        env:
+        - name: PYTHONPATH
+          value: /workspace/src:/workspace:/app:/app/v3
+        - name: RANK
+          value: '0'
+        - name: WORLD_SIZE
+          value: '2'
+        - name: MASTER_ADDR
+          value: v3-byom-qwen3-smoke-rank0.v3-byom-qwen3-smoke-headless.llm.svc.cluster.local
+        - name: MASTER_PORT
+          value: '29678'
+        - name: V3_CTRL_PORT
+          value: '29679'
+        - name: NCCL_SOCKET_IFNAME
+          value: eth0
+        - name: NCCL_IB_DISABLE
+          value: '1'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        - name: MODEL_DIR
+          value: /models/qwen3-14b
+        - name: HF_HUB_OFFLINE
+          value: '1'
+        - name: TOKENIZERS_PARALLELISM
+          value: 'false'
+        - name: OMP_NUM_THREADS
+          value: '1'
+        resources:
+          requests:
+            nvidia.com/gpu: '1'
+            memory: 6Gi
+          limits:
+            nvidia.com/gpu: '1'
+            memory: 12Gi
+        volumeMounts:
+        - name: test-code
+          mountPath: /workspace
+          readOnly: true
+        - name: v3-gpt2-shm
+          mountPath: /dev/shm
+        - name: model-files
+          mountPath: /models
+          readOnly: true
+        args:
+        - --config
+        - /workspace/examples/v3_byom_qwen3.json
+      volumes:
+      - name: test-code
+        projected:
+          sources:
+          - configMap:
+              name: v3-byom-qwen3-smoke-code
+              items:
+              - key: source_0
+                path: src/llm_runtime/__init__.py
+              - key: source_1
+                path: src/llm_runtime/v3_execution_factory.py
+              - key: source_2
+                path: src/llm_runtime/v3_pipeline_scheduler.py
+              - key: source_3
+                path: src/llm_runtime/v3_ordered_rank_transport.py
+              - key: source_4
+                path: src/llm_runtime/providers/__init__.py
+              - key: source_5
+                path: src/llm_runtime/providers/v3_qwen3_partition.py
+              - key: source_6
+                path: src/llm_runtime/providers/v3_qwen3_process_factory.py
+              - key: source_7
+                path: src/llm_runtime/providers/v3_qwen3_stage_only_factory.py
+              - key: source_8
+                path: scripts/v3_provider_preflight.py
+              - key: source_9
+                path: scripts/v3_generic_nccl_runner.py
+              - key: source_10
+                path: examples/v3_byom_qwen3.json
+      - name: v3-gpt2-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: model-files
+        persistentVolumeClaim:
+          claimName: model-files-qwen3-0
+          readOnly: true
+      hostname: v3-byom-qwen3-smoke-rank0
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v3-byom-qwen3-smoke-rank1
+  namespace: llm
+spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 0
+  activeDeadlineSeconds: 2700
+  template:
+    metadata:
+      labels:
+        app: v3-byom-qwen3-smoke
+        rank: '1'
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 20
+      subdomain: v3-byom-qwen3-smoke-headless
+      nodeSelector:
+        pool: gpu
+      tolerations:
+      - operator: Exists
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: v3-byom-qwen3-smoke
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: runtime
+        image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+        command:
+        - python
+        - -u
+        - /workspace/scripts/v3_generic_nccl_runner.py
+        env:
+        - name: PYTHONPATH
+          value: /workspace/src:/workspace:/app:/app/v3
+        - name: RANK
+          value: '1'
+        - name: WORLD_SIZE
+          value: '2'
+        - name: MASTER_ADDR
+          value: v3-byom-qwen3-smoke-rank0.v3-byom-qwen3-smoke-headless.llm.svc.cluster.local
+        - name: MASTER_PORT
+          value: '29678'
+        - name: V3_CTRL_PORT
+          value: '29679'
+        - name: NCCL_SOCKET_IFNAME
+          value: eth0
+        - name: NCCL_IB_DISABLE
+          value: '1'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        - name: MODEL_DIR
+          value: /models/qwen3-14b
+        - name: HF_HUB_OFFLINE
+          value: '1'
+        - name: TOKENIZERS_PARALLELISM
+          value: 'false'
+        - name: OMP_NUM_THREADS
+          value: '1'
+        resources:
+          requests:
+            nvidia.com/gpu: '1'
+            memory: 6Gi
+          limits:
+            nvidia.com/gpu: '1'
+            memory: 12Gi
+        volumeMounts:
+        - name: test-code
+          mountPath: /workspace
+          readOnly: true
+        - name: v3-gpt2-shm
+          mountPath: /dev/shm
+        - name: model-files
+          mountPath: /models
+          readOnly: true
+        args:
+        - --config
+        - /workspace/examples/v3_byom_qwen3.json
+      volumes:
+      - name: test-code
+        projected:
+          sources:
+          - configMap:
+              name: v3-byom-qwen3-smoke-code
+              items:
+              - key: source_0
+                path: src/llm_runtime/__init__.py
+              - key: source_1
+                path: src/llm_runtime/v3_execution_factory.py
+              - key: source_2
+                path: src/llm_runtime/v3_pipeline_scheduler.py
+              - key: source_3
+                path: src/llm_runtime/v3_ordered_rank_transport.py
+              - key: source_4
+                path: src/llm_runtime/providers/__init__.py
+              - key: source_5
+                path: src/llm_runtime/providers/v3_qwen3_partition.py
+              - key: source_6
+                path: src/llm_runtime/providers/v3_qwen3_process_factory.py
+              - key: source_7
+                path: src/llm_runtime/providers/v3_qwen3_stage_only_factory.py
+              - key: source_8
+                path: scripts/v3_provider_preflight.py
+              - key: source_9
+                path: scripts/v3_generic_nccl_runner.py
+              - key: source_10
+                path: examples/v3_byom_qwen3.json
+      - name: v3-gpt2-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: model-files
+        persistentVolumeClaim:
+          claimName: model-files-qwen3-1
+          readOnly: true
+      hostname: v3-byom-qwen3-smoke-rank1
