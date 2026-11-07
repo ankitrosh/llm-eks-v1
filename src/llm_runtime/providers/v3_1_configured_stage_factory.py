@@ -182,6 +182,11 @@ def create_v31_qwen3_stage_factory(
                 "after launch planning"
             )
 
+        # Planning validates checkpoint compatibility.
+        # Execution must additionally validate the actual
+        # device, activation dtype, kernel and extension.
+        provider.validate_runtime(context, profile)
+
         if profile.execution_mode != "linear":
             raise NotImplementedError(
                 "Stage-level quantization execution adapters "

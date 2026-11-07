@@ -612,3 +612,40 @@ def test_custom_quantization_factory_from_config(
     assert executor.model.quantized_linear_count == (
         (end - start) * LINEARS_PER_LAYER
     )
+
+
+def test_config_factory_validates_provider_runtime(
+    tmp_path, monkeypatch
+):
+    from llm_runtime.providers.v3_1_configured_stage_factory import (
+        create_v31_qwen3_stage_factory,
+    )
+
+    create_packed_qwen3_checkpoint(tmp_path, "gptq")
+
+    config = make_launch_config(tmp_path)
+    config["model"]["quantization"]["options"][
+        "execution_backend"
+    ] = "torch-reference"
+
+    spec = compile_v31_launch_spec(config)
+
+    def reject_runtime(self, context, profile):
+        raise RuntimeError("runtime-validation-sentinel")
+
+    monkeypatch.setattr(
+        GPTQInt8TorchReferenceProvider,
+        "validate_runtime",
+        reject_runtime,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="runtime-validation-sentinel",
+    ):
+        create_v31_qwen3_stage_factory(
+            config,
+            launch_spec=spec,
+            device="cpu",
+            dtype="float32",
+        )
