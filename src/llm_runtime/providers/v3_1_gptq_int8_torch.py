@@ -206,8 +206,22 @@ class GPTQInt8TorchReferenceProvider:
             "Only GPTQ INT8 is supported",
         )
 
-        self.checkpoint_format = quant.get(
-            "format", "gptq"
+        official_format = quant.get("checkpoint_format")
+        legacy_format = quant.get("format")
+
+        require(
+            official_format is None
+            or legacy_format is None
+            or official_format == legacy_format,
+            "Conflicting GPTQ checkpoint format metadata",
+        )
+
+        self.checkpoint_format = (
+            official_format
+            if official_format is not None
+            else legacy_format
+            if legacy_format is not None
+            else "gptq"
         )
         self.group_size = quant.get("group_size", 128)
 

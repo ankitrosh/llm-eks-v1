@@ -230,7 +230,7 @@ def create_packed_qwen3_checkpoint(root, checkpoint_format):
         "quant_method": "gptq",
         "bits": 8,
         "group_size": GROUP_SIZE,
-        "format": checkpoint_format,
+        "checkpoint_format": checkpoint_format,
     }
     config.dtype = "float32"
 
@@ -246,7 +246,7 @@ def create_packed_qwen3_checkpoint(root, checkpoint_format):
     )
 
     assert saved_config["quantization_config"][
-        "format"
+        "checkpoint_format"
     ] == checkpoint_format
 
     return reference, quantized_names
@@ -424,3 +424,191 @@ def test_packed_qwen3_three_stage_execution(
             rtol=2e-5,
             atol=2e-5,
         )
+
+
+@pytest.mark.parametrize(
+    "checkpoint_format",
+    ["gptq", "gptq_v2"],
+)
+def test_config_selected_gptq_execution(
+    tmp_path, checkpoint_format
+):
+    from llm_runtime.providers.v3_1_configured_stage_factory import (
+        create_v31_qwen3_stage_factory,
+    )
+
+    reference, _ = create_packed_qwen3_checkpoint(
+        tmp_path, checkpoint_format
+    )
+
+    config = make_launch_config(tmp_path)
+    config["model"]["quantization"]["options"][
+        "execution_backend"
+    ] = "torch-reference"
+
+    spec = compile_v31_launch_spec(config)
+
+    factory = create_v31_qwen3_stage_factory(
+        config,
+        launch_spec=spec,
+        device="cpu",
+        dtype="float32",
+    )
+
+    executors = [
+        factory(rank)
+        for rank in range(spec.world_size)
+    ]
+
+    assert sum(
+        executor.model.quantized_linear_count
+        for executor in executors
+    ) == NUM_LAYERS * LINEARS_PER_LAYER
+
+    input_ids = torch.tensor(
+        [[4, 7, 9]], dtype=torch.long
+    )
+
+    caches = [None] * spec.world_size
+
+    # Test both prefill and a cached decode step.
+    for step, position, first_payload in (
+        (0, 0, input_ids),
+        (1, 3, 11),
+    ):
+        payload = first_payload
+
+        with torch.inference_mode():
+            for rank, executor in enumerate(executors):
+                result = executor(
+                    SimpleNamespace(
+                        step=step,
+                        position=position,
+                        payload=payload,
+                    ),
+                    caches[rank],
+                )
+
+                payload = result.payload
+                caches[rank] = result.cache_state
+
+            reference_ids = (
+                input_ids
+                if step == 0
+                else torch.tensor(
+                    [[4, 7, 9, 11]],
+                    dtype=torch.long,
+                )
+            )
+
+            expected = reference(
+                input_ids=reference_ids,
+                use_cache=False,
+            ).logits[:, -1:, :]
+
+        torch.testing.assert_close(
+            payload,
+            expected,
+            rtol=2e-5,
+            atol=2e-5,
+        )
+
+
+def test_gptq_requires_explicit_execution_backend(tmp_path):
+    from llm_runtime.providers.v3_1_configured_stage_factory import (
+        create_v31_qwen3_stage_factory,
+    )
+
+    create_packed_qwen3_checkpoint(tmp_path, "gptq")
+    config = make_launch_config(tmp_path)
+
+    with pytest.raises(
+        ValueError,
+        match="execution_backend",
+    ):
+        create_v31_qwen3_stage_factory(
+            config,
+            device="cpu",
+            dtype="float32",
+        )
+
+
+def test_gptq_cpu_reference_rejects_bfloat16(tmp_path):
+    from llm_runtime.providers.v3_1_configured_stage_factory import (
+        create_v31_qwen3_stage_factory,
+    )
+
+    create_packed_qwen3_checkpoint(tmp_path, "gptq")
+    config = make_launch_config(tmp_path)
+
+    config["model"]["quantization"]["options"][
+        "execution_backend"
+    ] = "torch-reference"
+
+    with pytest.raises(ValueError, match="float32"):
+        create_v31_qwen3_stage_factory(
+            config,
+            device="cpu",
+            dtype="bfloat16",
+        )
+
+
+def test_custom_quantization_factory_from_config(
+    tmp_path, monkeypatch
+):
+    import sys
+    import types
+
+    from llm_runtime.providers.v3_1_configured_stage_factory import (
+        create_v31_qwen3_stage_factory,
+    )
+
+    create_packed_qwen3_checkpoint(tmp_path, "gptq_v2")
+
+    module = types.ModuleType(
+        "v31_test_custom_execution_provider"
+    )
+
+    module.create_provider = (
+        lambda context: GPTQInt8TorchReferenceProvider(
+            context
+        )
+    )
+
+    monkeypatch.setitem(
+        sys.modules,
+        module.__name__,
+        module,
+    )
+
+    config = make_launch_config(tmp_path)
+
+    config["model"]["quantization"] = {
+        "provider": "custom",
+        "factory": (
+            "v31_test_custom_execution_provider:"
+            "create_provider"
+        ),
+        "options": {
+            "bits": 8,
+            "group_size": GROUP_SIZE,
+            "activation_dtype": "float32",
+        },
+    }
+
+    spec = compile_v31_launch_spec(config)
+
+    factory = create_v31_qwen3_stage_factory(
+        config,
+        launch_spec=spec,
+        device="cpu",
+        dtype="float32",
+    )
+
+    executor = factory(0)
+
+    start, end = spec.layout.rank_bounds(0)
+
+    assert executor.model.quantized_linear_count == (
+        (end - start) * LINEARS_PER_LAYER
+    )

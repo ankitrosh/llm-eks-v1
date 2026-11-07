@@ -324,3 +324,23 @@ def test_quantized_launch_requires_checkpoint(tmp_path):
 
     with pytest.raises(ValueError, match="checkpoint_dir"):
         compile_v31_launch_spec(config)
+
+
+def test_conflicting_gptq_format_metadata_rejected(tmp_path):
+    make_checkpoint(tmp_path)
+
+    config_path = tmp_path / "config.json"
+    config = json.loads(config_path.read_text())
+
+    config["quantization_config"]["format"] = "gptq"
+    config["quantization_config"][
+        "checkpoint_format"
+    ] = "gptq_v2"
+
+    config_path.write_text(json.dumps(config))
+
+    with pytest.raises(
+        ValueError,
+        match="Conflicting GPTQ",
+    ):
+        inspect_qwen3_gptq_int8(tmp_path)

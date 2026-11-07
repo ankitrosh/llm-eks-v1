@@ -80,7 +80,25 @@ def inspect_qwen3_gptq_int8(checkpoint_dir):
             "This inspector supports GPTQ INT8 only"
         )
 
-    checkpoint_format = quant.get("format", "gptq")
+    official_format = quant.get("checkpoint_format")
+    legacy_format = quant.get("format")
+
+    if (
+        official_format is not None
+        and legacy_format is not None
+        and official_format != legacy_format
+    ):
+        raise QuantizationProviderError(
+            "Conflicting GPTQ checkpoint format metadata"
+        )
+
+    checkpoint_format = (
+        official_format
+        if official_format is not None
+        else legacy_format
+        if legacy_format is not None
+        else "gptq"
+    )
 
     if checkpoint_format not in ("gptq", "gptq_v2"):
         raise QuantizationProviderError(
