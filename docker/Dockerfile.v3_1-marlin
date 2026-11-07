@@ -51,4 +51,4 @@ RUN python -m py_compile \
       /app/llm_runtime/providers/v3_1_configured_stage_factory.py \
       /app/scripts/v3_1_marlin_gpu_smoke.py
 
-RUN python -c "from importlib.metadata import version; assert version('gptqmodel') == '4.0.0'; import gptqmodel_marlin_kernels; from gptqmodel.nn_modules.qlinear.marlin import MarlinQuantLinear; print('PASS: V3.1 Marlin runtime imports')"
+RUN python -c "import torch; from importlib.metadata import version; assert version('gptqmodel') == '4.0.0'; import gptqmodel_marlin_kernels; from gptqmodel.nn_modules.qlinear.marlin import MarlinQuantLinear; print('PASS: V3.1 Marlin runtime imports')"
