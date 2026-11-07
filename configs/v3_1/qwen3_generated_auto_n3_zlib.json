@@ -1,0 +1,22 @@
+{
+  "model": {
+    "checkpoint_dir": "__generated_at_runtime__"
+  },
+  "pipeline": {
+    "num_ranks": 3,
+    "partition": "auto",
+    "memory": {
+      "gpu_memory_gib": 1.0,
+      "reserve_gib": 0.25,
+      "max_active_requests": 3,
+      "max_total_tokens_per_request": 64
+    }
+  },
+  "communication": {
+    "backend": "gloo_staged",
+    "codec": "torch-zlib-v1",
+    "options": {
+      "zlib_level": 3
+    }
+  }
+}
