@@ -26,6 +26,9 @@ from llm_runtime.v3_pipeline_scheduler import StageResult
 from llm_runtime.providers.v3_1_qwen3_layout import (
     Qwen3NRankLayout,
 )
+from llm_runtime.providers.v3_1_quantized_stage_loader import (
+    materialize_quantized_decoder_layer,
+)
 from llm_runtime.providers.v3_qwen3_stage_only_factory import (
     SelectiveTensorReader,
     StageCheckpointError,
@@ -44,6 +47,7 @@ class NRankPartialQwen3Model(nn.Module):
         device,
         dtype,
         reader,
+        quantization_provider=None,
     ):
         super().__init__()
 
@@ -62,6 +66,7 @@ class NRankPartialQwen3Model(nn.Module):
         self.layout = layout
         self.owned_layers = tuple(range(start, end))
         self.loaded_tensor_count = 0
+        self.quantized_linear_count = 0
 
         self.model = nn.Module()
         self.model.layers = nn.ModuleList(
@@ -108,13 +113,30 @@ class NRankPartialQwen3Model(nn.Module):
             )
 
         for idx in self.owned_layers:
-            self.loaded_tensor_count += materialize_module(
-                self.model.layers[idx],
-                f"model.layers.{idx}.",
-                reader,
-                device,
-                dtype,
-            )
+            prefix = f"model.layers.{idx}."
+
+            if quantization_provider is None:
+                self.loaded_tensor_count += materialize_module(
+                    self.model.layers[idx],
+                    prefix,
+                    reader,
+                    device,
+                    dtype,
+                )
+            else:
+                loaded, replaced = (
+                    materialize_quantized_decoder_layer(
+                        self.model.layers[idx],
+                        prefix,
+                        reader,
+                        quantization_provider,
+                        device,
+                        dtype,
+                    )
+                )
+
+                self.loaded_tensor_count += loaded
+                self.quantized_linear_count += replaced
 
         if rank == layout.world_size - 1:
             self.loaded_tensor_count += materialize_module(
@@ -310,6 +332,7 @@ class Qwen3NRankStageOnlyFactory:
     layer_boundaries: tuple[int, ...]
     device: str = "cpu"
     dtype: str = "float32"
+    quantization_provider: object | None = None
 
     def __call__(self, rank):
         dtype_map = {
@@ -328,10 +351,27 @@ class Qwen3NRankStageOnlyFactory:
             local_files_only=True,
         )
 
-        if getattr(config, "quantization_config", None):
+        if (
+            getattr(config, "quantization_config", None)
+            and self.quantization_provider is None
+        ):
             raise StageCheckpointError(
-                "Quantized checkpoints are not supported"
+                "Quantized checkpoint requires an "
+                "execution provider"
             )
+
+        if self.quantization_provider is not None:
+            if not callable(
+                getattr(
+                    self.quantization_provider,
+                    "build_linear",
+                    None,
+                )
+            ):
+                raise StageCheckpointError(
+                    "Linear quantization provider must "
+                    "implement build_linear"
+                )
 
         layout = Qwen3NRankLayout(
             config.num_hidden_layers,
@@ -353,6 +393,7 @@ class Qwen3NRankStageOnlyFactory:
                 device,
                 dtype_map[self.dtype],
                 reader,
+                self.quantization_provider,
             )
 
         return Qwen3NRankExecutor(
