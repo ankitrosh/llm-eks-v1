@@ -9,6 +9,7 @@ Supports Gloo CPU and NCCL CUDA, depending on the process group.
 from __future__ import annotations
 
 import json
+import math
 import queue
 import socket
 import threading
@@ -109,23 +110,52 @@ def open_control(rank, host, port, timeout_s=60):
     return conn
 
 
-def _shape(value):
+
+@dataclass(frozen=True)
+class TensorTransferLimits:
+    max_dimensions: int = 8
+    max_tensor_bytes: int = 512 * 1024 * 1024
+
+    def __post_init__(self):
+        if self.max_dimensions < 1 or self.max_tensor_bytes < 1:
+            raise ValueError("Invalid tensor transfer limits")
+
+
+_DTYPE_BYTES = {
+    "float32": 4,
+    "float16": 2,
+    "bfloat16": 2,
+}
+
+
+def _shape(value, dtype_name, *, limits=None):
+    """Validate dynamic tensor shape and transfer size."""
+    limits = limits or TensorTransferLimits()
+
     if (
-        not isinstance(value, list)
-        or len(value) != 3
+        not isinstance(value, (list, tuple))
+        or not 1 <= len(value) <= limits.max_dimensions
         or any(
-            type(dim) is not int or dim < 1 or dim > 4096
+            type(dim) is not int or dim < 1
             for dim in value
         )
     ):
+        raise TransportFailure("Invalid tensor shape")
+
+    element_size = _DTYPE_BYTES.get(dtype_name)
+
+    if element_size is None:
+        raise TransportFailure("Unsupported tensor dtype")
+
+    shape = tuple(value)
+    nbytes = math.prod(shape) * element_size
+
+    if nbytes > limits.max_tensor_bytes:
         raise TransportFailure(
-            "Unsupported tensor shape"
+            f"Tensor exceeds transfer limit: {nbytes} bytes"
         )
 
-    if value[0] * value[1] * value[2] > 8_000_000:
-        raise TransportFailure("Tensor too large")
-
-    return tuple(value)
+    return shape
 
 
 @dataclass
@@ -150,10 +180,14 @@ class OrderedRank0Transport:
         device,
         max_pending=4,
         timeout_s=60,
+        tensor_limits=None,
     ):
         self.conn = conn
         self.reader = conn.makefile("rb")
         self.device = torch.device(device)
+        self.tensor_limits = (
+            tensor_limits or TensorTransferLimits()
+        )
 
         self.timeout_s = timeout_s
         self.max_pending = max_pending
@@ -194,12 +228,18 @@ class OrderedRank0Transport:
             )
 
         if (
-            tensor.ndim != 3
+            tensor.layout != torch.strided
             or tensor.dtype not in _DTYPES.values()
         ):
             raise TransportFailure(
                 "Invalid activation tensor"
             )
+
+        _shape(
+            list(tensor.shape),
+            str(tensor.dtype).removeprefix("torch."),
+            limits=self.tensor_limits,
+        )
 
         with self._lock:
             if self._error:
@@ -363,7 +403,11 @@ class OrderedRank0Transport:
                     )
 
                 elif reply.get("op") == "RESULT":
-                    shape = _shape(reply.get("shape"))
+                    shape = _shape(
+                        reply.get("shape"),
+                        reply.get("dtype"),
+                        limits=self.tensor_limits,
+                    )
                     dtype = _DTYPES.get(
                         reply.get("dtype")
                     )
@@ -422,11 +466,12 @@ class OrderedRank0Transport:
             )
 
 
-def run_rank1(conn, *, device, execute):
+def run_rank1(conn, *, device, execute, tensor_limits=None):
     """Execute remote stage operations and own their KV caches."""
 
     reader = conn.makefile("rb")
     device = torch.device(device)
+    tensor_limits = tensor_limits or TensorTransferLimits()
 
     caches = {}
     next_steps = {}
@@ -499,7 +544,11 @@ def run_rank1(conn, *, device, execute):
 
             last_sequence = seq
 
-            shape = _shape(cmd.get("shape"))
+            shape = _shape(
+                cmd.get("shape"),
+                cmd.get("dtype"),
+                limits=tensor_limits,
+            )
             dtype = _DTYPES.get(
                 cmd.get("dtype")
             )
@@ -535,12 +584,18 @@ def run_rank1(conn, *, device, execute):
 
                 if (
                     not isinstance(result, torch.Tensor)
-                    or result.ndim != 3
+                    or result.layout != torch.strided
                     or result.device != device
                 ):
                     raise ValueError(
                         "Remote model returned invalid tensor"
                     )
+
+                _shape(
+                    list(result.shape),
+                    str(result.dtype).removeprefix("torch."),
+                    limits=tensor_limits,
+                )
 
                 caches[rid] = cache
                 next_steps[rid] = step + 1

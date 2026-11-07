@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 from transformers import GPT2Config, GPT2LMHeadModel
 
-from experiments.v3_gpt2_process_factory import GPT2ProcessFactory
+from llm_runtime.v3_execution_factory import GenericStageFactory
 from llm_runtime.v3_pipeline_scheduler import PipelineScheduler
 from llm_runtime.v3_process_transport import ProcessStageTransport
 
@@ -84,13 +84,20 @@ def main():
             for prompt in prompts
         ]
 
-        factory = GPT2ProcessFactory(
-            checkpoint_dir=checkpoint,
-            manifest_path=str(
-                Path(
-                    "examples/v3_gpt2_extension.yaml"
-                ).resolve()
+
+        factory = GenericStageFactory(
+            factory_path=(
+                "experiments.v3_gpt2_process_factory:"
+                "GPT2ProcessFactory"
             ),
+            kwargs={
+                "checkpoint_dir": checkpoint,
+                "manifest_path": str(
+                    Path(
+                        "examples/v3_gpt2_extension.yaml"
+                    ).resolve()
+                ),
+            },
         )
 
         with ProcessStageTransport(

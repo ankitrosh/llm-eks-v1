@@ -16,12 +16,13 @@ from llm_runtime.v3_plugin_registry import load_plugin
 
 
 class GPT2StageExecutor:
-    def __init__(self, adapter, stage, config, rank, selected_layer):
+    def __init__(self, adapter, stage, config, rank, selected_layer, device):
         self.adapter = adapter
         self.stage = stage
         self.config = config
         self.rank = rank
         self.selected_layer = selected_layer
+        self.device = torch.device(device)
 
     def __call__(self, task, cache):
         if cache is None:
@@ -36,12 +37,15 @@ class GPT2StageExecutor:
         if self.rank == 0:
             if isinstance(payload, int):
                 payload = torch.tensor(
-                    [[payload]], dtype=torch.long
+                    [[payload]], dtype=torch.long,
+                    device=self.device,
                 )
             assert payload.ndim == 2
+            payload = payload.to(self.device)
         else:
             assert isinstance(payload, torch.Tensor)
             assert payload.ndim == 3
+            assert payload.device == self.device
 
         wrapper = self.stage.blocks[
             str(self.selected_layer)
@@ -81,6 +85,8 @@ class GPT2StageExecutor:
 class GPT2ProcessFactory:
     checkpoint_dir: str
     manifest_path: str
+    device: str = "cpu"
+    dtype: str = "float32"
 
     def __call__(self, rank):
         # Executed inside the owning child process.
@@ -119,8 +125,8 @@ class GPT2ProcessFactory:
         stage = adapter.create_stage(
             specs[rank],
             checkpoint=self.checkpoint_dir,
-            device="cpu",
-            dtype="float32",
+            device=self.device,
+            dtype=self.dtype,
         )
 
         stage.eval()
@@ -141,4 +147,5 @@ class GPT2ProcessFactory:
             config,
             rank,
             installed[0],
+            self.device,
         )
