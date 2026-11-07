@@ -83,7 +83,7 @@ def pack_output_axis(codes):
     return words.to(torch.int32).contiguous()
 
 
-def quantize_and_pack(weight, checkpoint_format):
+def quantize_and_pack(weight, checkpoint_format, group_size=GROUP_SIZE):
     """Return GPTQ-format tensors and independent dequantization."""
 
     # PyTorch Linear weights have shape [out_features, in_features].
@@ -92,11 +92,11 @@ def quantize_and_pack(weight, checkpoint_format):
     k, n = values.shape
     assert k % 4 == 0 and n % 4 == 0
 
-    groups = math.ceil(k / GROUP_SIZE)
+    groups = math.ceil(k / group_size)
 
     g_idx = (
         torch.arange(k, dtype=torch.int32)
-        // GROUP_SIZE
+        // group_size
     )
 
     codes = torch.empty((k, n), dtype=torch.int32)
@@ -105,8 +105,8 @@ def quantize_and_pack(weight, checkpoint_format):
     )
 
     for group in range(groups):
-        start = group * GROUP_SIZE
-        end = min(start + GROUP_SIZE, k)
+        start = group * group_size
+        end = min(start + group_size, k)
 
         block = values[start:end]
 
@@ -157,7 +157,7 @@ def quantize_and_pack(weight, checkpoint_format):
     return tensors, reconstructed
 
 
-def create_packed_qwen3_checkpoint(root, checkpoint_format):
+def create_packed_qwen3_checkpoint(root, checkpoint_format, group_size=GROUP_SIZE):
     torch.manual_seed(42)
 
     config = Qwen3Config(
@@ -202,7 +202,7 @@ def create_packed_qwen3_checkpoint(root, checkpoint_format):
             )
 
             packed, reconstructed = quantize_and_pack(
-                original, checkpoint_format
+                original, checkpoint_format, group_size
             )
 
             for suffix, tensor in packed.items():
@@ -229,7 +229,7 @@ def create_packed_qwen3_checkpoint(root, checkpoint_format):
     config.quantization_config = {
         "quant_method": "gptq",
         "bits": 8,
-        "group_size": GROUP_SIZE,
+        "group_size": group_size,
         "checkpoint_format": checkpoint_format,
     }
     config.dtype = "float32"

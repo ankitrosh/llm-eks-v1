@@ -121,17 +121,33 @@ def create_v31_qwen3_stage_factory(
         )
 
         if provider_name == "gptq":
-            backend = options.get("execution_backend")
+            backend = options.get(
+                "execution_backend", "auto"
+            )
 
-            if backend != "torch-reference":
-                raise ValueError(
-                    "GPTQ execution_backend must explicitly be "
-                    "'torch-reference' for this CPU implementation"
+            if backend == "torch-reference":
+                provider = GPTQInt8TorchReferenceProvider(
+                    context
                 )
 
-            provider = GPTQInt8TorchReferenceProvider(
-                context
-            )
+            elif backend in ("auto", "marlin"):
+                if device.split(":")[0] != "cuda":
+                    raise ValueError(
+                        "GPTQ execution_backend requires CUDA "
+                        "for automatic Marlin selection; "
+                        "use torch-reference explicitly for CPU"
+                    )
+
+                from llm_runtime.providers.v3_1_gptq_marlin_provider import (
+                    GPTQMarlinProvider,
+                )
+
+                provider = GPTQMarlinProvider(context)
+
+            else:
+                raise ValueError(
+                    f"Unsupported GPTQ execution_backend: {backend}"
+                )
 
         elif provider_name == "custom":
             factory_path = selector.get("factory")
