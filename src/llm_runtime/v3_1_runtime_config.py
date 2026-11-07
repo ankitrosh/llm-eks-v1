@@ -26,6 +26,7 @@ class V31ResolvedPlan:
     placements: tuple[StagePlacement, ...]
     transport_preference: str
     codec: str
+    communication_settings: dict | None = None
 
     def as_dict(self):
         return {
@@ -35,10 +36,14 @@ class V31ResolvedPlan:
             "layer_boundaries": list(
                 self.layout.boundaries
             ),
-            "communication": {
-                "backend": self.transport_preference,
-                "codec": self.codec,
-            },
+            "communication": (
+                dict(self.communication_settings)
+                if self.communication_settings is not None
+                else {
+                    "backend": self.transport_preference,
+                    "codec": self.codec,
+                }
+            ),
             "stages": [
                 {
                     "rank": stage.rank,
@@ -152,16 +157,52 @@ def resolve_v31_config(config):
 
     backend = communication.get("backend", "auto")
 
-    if backend not in ("auto", "nccl", "gloo_staged"):
+    if backend not in (
+        "auto", "nccl", "gloo_staged", "custom"
+    ):
         raise ValueError(
             f"Unsupported communication backend: {backend}"
         )
 
     codec = communication.get("codec", "identity")
 
-    if codec != "identity":
+    if codec not in (
+        "identity", "torch-zlib-v1", "custom"
+    ):
         raise ValueError(
-            "Only identity codec is supported in Phase 1"
+            f"Unsupported communication codec: {codec}"
+        )
+
+    if backend in ("nccl", "auto") and codec != "identity":
+        raise ValueError(
+            "NCCL/auto currently require identity codec; "
+            "select gloo_staged or a custom byte transport"
+        )
+
+    for name, enabled in (
+        ("transport_factory", backend == "custom"),
+        ("codec_factory", codec == "custom"),
+    ):
+        value = communication.get(name)
+
+        if enabled:
+            if (
+                not isinstance(value, str)
+                or ":" not in value
+            ):
+                raise ValueError(
+                    f"{name} must use module:function"
+                )
+        elif value is not None:
+            raise ValueError(
+                f"{name} requires the matching custom plugin"
+            )
+
+    options = communication.get("options", {})
+
+    if not isinstance(options, Mapping):
+        raise ValueError(
+            "communication.options must be an object"
         )
 
     placements = plan_contiguous_layers(
@@ -207,4 +248,9 @@ def resolve_v31_config(config):
         placements=placements,
         transport_preference=backend,
         codec=codec,
+        communication_settings={
+            "backend": backend,
+            "codec": codec,
+            **dict(communication),
+        },
     )

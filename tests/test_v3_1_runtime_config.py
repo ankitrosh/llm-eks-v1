@@ -170,3 +170,55 @@ def test_config_not_mutated():
     resolve_v31_config(config)
 
     assert config == original
+
+
+def test_compressed_communication_config():
+    config = make_config(3)
+
+    config["communication"] = {
+        "backend": "gloo_staged",
+        "codec": "torch-zlib-v1",
+        "options": {"zlib_level": 3},
+    }
+
+    result = resolve_v31_config(config).as_dict()
+
+    assert result["communication"] == {
+        "backend": "gloo_staged",
+        "codec": "torch-zlib-v1",
+        "options": {"zlib_level": 3},
+    }
+
+
+def test_custom_transport_and_codec_config():
+    config = make_config(3)
+
+    config["communication"] = {
+        "backend": "custom",
+        "transport_factory": "example.transport:create",
+        "codec": "custom",
+        "codec_factory": "example.codec:create",
+    }
+
+    result = resolve_v31_config(config).as_dict()
+
+    assert (
+        result["communication"]["transport_factory"]
+        == "example.transport:create"
+    )
+    assert (
+        result["communication"]["codec_factory"]
+        == "example.codec:create"
+    )
+
+
+def test_compressed_codec_rejected_with_nccl():
+    config = make_config(3)
+
+    config["communication"] = {
+        "backend": "nccl",
+        "codec": "torch-zlib-v1",
+    }
+
+    with pytest.raises(ValueError):
+        resolve_v31_config(config)

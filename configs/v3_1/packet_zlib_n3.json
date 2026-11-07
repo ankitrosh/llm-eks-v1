@@ -1,0 +1,9 @@
+{
+  "communication": {
+    "backend": "gloo_staged",
+    "codec": "torch-zlib-v1",
+    "options": {
+      "zlib_level": 3
+    }
+  }
+}
