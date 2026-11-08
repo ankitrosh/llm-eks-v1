@@ -1,0 +1,231 @@
+# V3.1 reusable Kubernetes NCCL execution template.
+#
+# Edit this file for Kubernetes deployment settings.
+# Edit the mounted model.json for model, quantization and partitioning.
+#
+# Before deployment, create:
+#   ConfigMap/v31-configured-model
+#     key: model.json
+#   ConfigMap/v31-configured-scripts
+#     keys: v3_1_configured_nccl.py,
+#           v3_1_nrank_transport.py, __init__.py
+#
+# IMPORTANT:
+# Job completions, parallelism, WORLD_SIZE and
+# model.json pipeline.num_ranks must agree.
+#
+# This is a one-shot generation Job, not an HTTP service.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: v31-configured
+  namespace: llm
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: v31-configured
+  ports:
+    - name: rendezvous
+      port: 29500
+      targetPort: 29500
+    - name: control
+      port: 29679
+      targetPort: 29679
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v31-configured
+  namespace: llm
+
+spec:
+  completionMode: Indexed
+
+  # Change both when using a different rank count.
+  completions: 2
+  parallelism: 2
+
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+
+  template:
+    metadata:
+      labels:
+        app: v31-configured
+
+    spec:
+      subdomain: v31-configured
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 30
+
+      nodeSelector:
+        eks.amazonaws.com/nodegroup: gpu-a10g
+        node.kubernetes.io/instance-type: g5.xlarge
+
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: v31-configured
+              topologyKey: kubernetes.io/hostname
+
+      # Default: download the model into an ephemeral
+      # shared pod volume before starting the GPU worker.
+      #
+      # For an existing checkpoint, replace this step
+      # with an appropriate PVC/model-storage mount.
+      initContainers:
+        - name: checkpoint-download
+          image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:71bef0100a54ec47ce7f3a0fb7c3bc029e7f2b917736d246de1679b1fcb42f7e
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+
+              python - <<'PY'
+              import os
+              from huggingface_hub import snapshot_download
+
+              snapshot_download(
+                  repo_id=os.environ["HF_MODEL_ID"],
+                  local_dir="/models/model",
+              )
+              PY
+
+          env:
+            - name: HF_MODEL_ID
+              value: Qwen/Qwen3-0.6B-GPTQ-Int8
+            - name: HF_HOME
+              value: /tmp/huggingface
+
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+
+          volumeMounts:
+            - name: model-store
+              mountPath: /models
+
+      containers:
+        - name: inference
+          image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:71bef0100a54ec47ce7f3a0fb7c3bc029e7f2b917736d246de1679b1fcb42f7e
+          imagePullPolicy: IfNotPresent
+
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+
+              export PYTHONPATH=/opt/v31:/app:/opt/marlin-output
+              export PYTHONUNBUFFERED=1
+
+              echo "========== V3.1 RANK ${RANK}/${WORLD_SIZE} =========="
+              nvidia-smi
+
+              exec python -u \
+                /opt/v31/v3_1_configured_nccl.py \
+                --config /etc/v31/model.json \
+                --prompt-token-ids 2,5,8,11 \
+                --max-new-tokens 4 \
+                --activation-dtype float16 \
+                --timeout 180
+
+          env:
+            - name: RANK
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+
+            # Must equal pipeline.num_ranks.
+            - name: WORLD_SIZE
+              value: "2"
+
+            - name: MASTER_ADDR
+              value: v31-configured-0.v31-configured.llm.svc.cluster.local
+
+            - name: MASTER_PORT
+              value: "29500"
+
+            - name: V31_CTRL_PORT
+              value: "29679"
+
+            - name: OMP_NUM_THREADS
+              value: "1"
+
+            - name: MKL_NUM_THREADS
+              value: "1"
+
+            - name: NCCL_IB_DISABLE
+              value: "1"
+
+            - name: NCCL_NET
+              value: Socket
+
+            - name: NCCL_SOCKET_IFNAME
+              value: eth0
+
+            - name: NCCL_DEBUG
+              value: INFO
+
+          resources:
+            requests:
+              cpu: "1"
+              memory: 6Gi
+              nvidia.com/gpu: "1"
+
+            limits:
+              cpu: "2"
+              memory: 12Gi
+              nvidia.com/gpu: "1"
+
+          volumeMounts:
+            - name: model-config
+              mountPath: /etc/v31
+              readOnly: true
+
+            - name: runtime-scripts
+              mountPath: /opt/v31
+              readOnly: true
+
+            - name: model-store
+              mountPath: /models
+
+            - name: nccl-shm
+              mountPath: /dev/shm
+
+      volumes:
+        - name: model-config
+          configMap:
+            name: v31-configured-model
+            items:
+              - key: model.json
+                path: model.json
+
+        - name: runtime-scripts
+          configMap:
+            name: v31-configured-scripts
+            items:
+              - key: v3_1_configured_nccl.py
+                path: v3_1_configured_nccl.py
+              - key: v3_1_nrank_transport.py
+                path: llm_runtime/v3_1_nrank_transport.py
+              - key: __init__.py
+                path: llm_runtime/__init__.py
+
+        - name: model-store
+          emptyDir:
+            sizeLimit: 16Gi
+
+        - name: nccl-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi
