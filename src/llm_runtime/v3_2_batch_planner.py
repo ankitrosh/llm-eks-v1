@@ -11,6 +11,12 @@ from dataclasses import dataclass, field
 from llm_runtime.v3_2_scheduler_api import (
     resolve_scheduler_config,
 )
+from llm_runtime.v3_2_policy_api import (
+    BatchCandidate,
+    BatchContext,
+    load_batch_policy,
+    validate_batch_decision,
+)
 
 
 class AdmissionBusy(RuntimeError):
@@ -60,7 +66,11 @@ class ContinuousBatchPlanner:
     the prompt plus the maximum generated token count.
     """
 
-    def __init__(self, config, *, kv_token_capacity=None):
+    def __init__(
+        self, config, *,
+        kv_token_capacity=None,
+        batch_policy=None,
+    ):
         settings = resolve_scheduler_config(config)
 
         if settings.mode != "continuous":
@@ -86,6 +96,12 @@ class ContinuousBatchPlanner:
             raise ValueError("Invalid KV capacity")
 
         self.settings = settings
+        policy_spec = (
+            batch_policy
+            if batch_policy is not None
+            else settings.batch_policy_adapter
+        )
+        self._batch_policy = load_batch_policy(policy_spec)
         self.max_total_tokens = maximum
         self.kv_token_capacity = kv_token_capacity
 
@@ -190,32 +206,64 @@ class ContinuousBatchPlanner:
             return None
 
         order = tuple(self._active)
-        first = self._requests[order[0]]
-        first_phase = (
-            "prefill"
-            if first.offset < len(first.prompt)
-            else "decode"
-        )
-
-        phases = {
-            "prefill"
-            if self._requests[rid].offset
-            < len(self._requests[rid].prompt)
-            else "decode"
-            for rid in order
-        }
-
-        if (
-            self.settings.policy == "fcfs"
-            and len(phases) == 2
-        ):
-            phase = (
-                "decode"
-                if self._last_phase == "prefill"
-                else "prefill"
+        if self._batch_policy is None:
+            first = self._requests[order[0]]
+            first_phase = (
+                "prefill"
+                if first.offset < len(first.prompt)
+                else "decode"
             )
+
+            phases = {
+                "prefill"
+                if self._requests[rid].offset
+                < len(self._requests[rid].prompt)
+                else "decode"
+                for rid in order
+            }
+
+            if (
+                self.settings.policy == "fcfs"
+                and len(phases) == 2
+            ):
+                phase = (
+                    "decode"
+                    if self._last_phase == "prefill"
+                    else "prefill"
+                )
+            else:
+                phase = first_phase
         else:
-            phase = first_phase
+            candidates = []
+
+            for rid in order:
+                state = self._requests[rid]
+                pending = len(state.prompt) - state.offset
+
+                candidates.append(BatchCandidate(
+                    request_id=rid,
+                    phase=(
+                        "prefill" if pending > 0 else "decode"
+                    ),
+                    ready_tokens=max(1, pending),
+                ))
+
+            context = BatchContext(
+                candidates=tuple(candidates),
+                max_requests_per_batch=(
+                    self.settings.max_requests_per_batch
+                ),
+                max_batch_tokens=self.settings.max_batch_tokens,
+                last_phase=self._last_phase,
+            )
+
+            decision = validate_batch_decision(
+                self._batch_policy.select_batch(context),
+                context,
+            )
+
+            phase = decision.phase
+            order = decision.request_ids
 
         budget = self.settings.max_batch_tokens
         items = []
@@ -282,7 +330,8 @@ class ContinuousBatchPlanner:
         self._last_phase = phase
 
         if (
-            self.settings.policy == "round_robin"
+            self._batch_policy is None
+            and self.settings.policy == "round_robin"
             and len(self._active) > 1
         ):
             self._active.rotate(-1)

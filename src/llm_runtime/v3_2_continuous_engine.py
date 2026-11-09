@@ -16,10 +16,13 @@ class ContinuousQwen3Engine:
     def __init__(
         self, model, config, *,
         sampler=None, stop_token_ids=None,
+        batch_policy=None,
     ):
         self.model = model.eval()
         self.device = next(model.parameters()).device
-        self.planner = ContinuousBatchPlanner(config)
+        self.planner = ContinuousBatchPlanner(
+            config, batch_policy=batch_policy
+        )
         self.sampler = sampler or (
             lambda logits: int(logits.argmax().item())
         )

@@ -13,6 +13,7 @@ class SchedulerSettings:
     max_batch_tokens: int | None
     max_queue_requests: int | None
     max_wait_ms: int | None
+    batch_policy_adapter: str | None = None
 
     def as_dict(self):
         return asdict(self)
@@ -52,12 +53,22 @@ def resolve_scheduler_config(config):
         "max_batch_tokens",
         "max_queue_requests",
         "max_wait_ms",
+        "batch_policy_adapter",
     }
 
     unknown = set(options) - allowed
     if unknown:
         raise ValueError(
             f"Unknown scheduler settings: {sorted(unknown)}"
+        )
+
+    adapter = options.get("batch_policy_adapter")
+
+    if "batch_policy_adapter" in options and (
+        type(adapter) is not str or not adapter
+    ):
+        raise ValueError(
+            "batch_policy_adapter must be an import path"
         )
 
     mode = options.get("mode", "interleaved")
@@ -74,6 +85,7 @@ def resolve_scheduler_config(config):
         "max_batch_tokens",
         "max_queue_requests",
         "max_wait_ms",
+        "batch_policy_adapter",
     }
 
     if mode == "interleaved":
@@ -137,6 +149,7 @@ def resolve_scheduler_config(config):
         max_batch_tokens=token_budget,
         max_queue_requests=queue_size,
         max_wait_ms=wait_ms,
+        batch_policy_adapter=adapter,
     )
 
 
