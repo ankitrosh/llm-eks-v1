@@ -1,0 +1,99 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "v33-recovery",
+    "namespace": "llm"
+  },
+  "spec": {
+    "replicas": 0,
+    "strategy": {
+      "type": "Recreate"
+    },
+    "selector": {
+      "matchLabels": {
+        "app": "v33-recovery"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "v33-recovery"
+        }
+      },
+      "spec": {
+        "nodeSelector": {
+          "eks.amazonaws.com/nodegroup": "cpu-system"
+        },
+        "containers": [
+          {
+            "name": "recovery",
+            "image": "python:3.12-slim",
+            "command": [
+              "python3",
+              "-u",
+              "/opt/v33/v33_recovery_controller.py"
+            ],
+            "env": [
+              {
+                "name": "AUTO_RECOVER",
+                "value": "false"
+              },
+              {
+                "name": "V33_VLLM_HEALTH_URL",
+                "value": "http://v33-vllm-api.llm.svc.cluster.local:8000/health"
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              },
+              "limits": {
+                "memory": "512Mi"
+              }
+            },
+            "volumeMounts": [
+              {
+                "name": "source",
+                "mountPath": "/opt/v33",
+                "readOnly": true
+              },
+              {
+                "name": "model-metadata",
+                "mountPath": "/opt/modelmeta",
+                "readOnly": true
+              }
+            ],
+            "ports": [
+              {
+                "containerPort": 8081
+              }
+            ],
+            "readinessProbe": {
+              "tcpSocket": {
+                "port": 8081
+              },
+              "periodSeconds": 5
+            }
+          }
+        ],
+        "volumes": [
+          {
+            "name": "source",
+            "configMap": {
+              "name": "v33-cpu-source"
+            }
+          },
+          {
+            "name": "model-metadata",
+            "configMap": {
+              "name": "v33-model-metadata"
+            }
+          }
+        ],
+        "serviceAccountName": "v33-recovery"
+      }
+    }
+  }
+}

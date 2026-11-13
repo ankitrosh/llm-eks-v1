@@ -1,0 +1,20 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "v33-coordinator",
+    "namespace": "llm"
+  },
+  "spec": {
+    "selector": {
+      "app": "v33-coordinator"
+    },
+    "ports": [
+      {
+        "name": "http",
+        "port": 8080,
+        "targetPort": 8080
+      }
+    ]
+  }
+}

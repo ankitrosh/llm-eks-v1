@@ -1,0 +1,133 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "v33-vllm-rank1",
+    "namespace": "llm"
+  },
+  "spec": {
+    "replicas": 0,
+    "strategy": {
+      "type": "Recreate"
+    },
+    "selector": {
+      "matchLabels": {
+        "app": "v33-vllm",
+        "rank": "1"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "v33-vllm",
+          "rank": "1"
+        }
+      },
+      "spec": {
+        "nodeSelector": {
+          "pool": "gpu"
+        },
+        "containers": [
+          {
+            "name": "vllm",
+            "image": "vllm/vllm-openai@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34",
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+              "vllm",
+              "serve",
+              "/models/qwen3-14b",
+              "--distributed-executor-backend",
+              "mp",
+              "--tensor-parallel-size",
+              "1",
+              "--pipeline-parallel-size",
+              "2",
+              "--nnodes",
+              "2",
+              "--node-rank",
+              "1",
+              "--master-addr",
+              "v33-vllm-rank0.llm.svc.cluster.local",
+              "--master-port",
+              "29501",
+              "--dtype",
+              "bfloat16",
+              "--max-model-len",
+              "2048",
+              "--headless",
+              "--gpu-memory-utilization",
+              "0.85",
+              "--max-num-seqs",
+              "4",
+              "--max-num-batched-tokens",
+              "512",
+              "--distributed-timeout-seconds",
+              "900",
+              "--enforce-eager"
+            ],
+            "env": [
+              {
+                "name": "NCCL_IB_DISABLE",
+                "value": "1"
+              },
+              {
+                "name": "NCCL_SOCKET_IFNAME",
+                "value": "eth0"
+              },
+              {
+                "name": "GLOO_SOCKET_IFNAME",
+                "value": "eth0"
+              },
+              {
+                "name": "VLLM_HOST_IP",
+                "valueFrom": {
+                  "fieldRef": {
+                    "fieldPath": "status.podIP"
+                  }
+                }
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "2",
+                "memory": "8Gi",
+                "nvidia.com/gpu": "1"
+              },
+              "limits": {
+                "memory": "14Gi",
+                "nvidia.com/gpu": "1"
+              }
+            },
+            "volumeMounts": [
+              {
+                "name": "model",
+                "mountPath": "/models",
+                "readOnly": true
+              },
+              {
+                "name": "dshm",
+                "mountPath": "/dev/shm"
+              }
+            ]
+          }
+        ],
+        "terminationGracePeriodSeconds": 30,
+        "volumes": [
+          {
+            "name": "model",
+            "persistentVolumeClaim": {
+              "claimName": "model-files-qwen3-1"
+            }
+          },
+          {
+            "name": "dshm",
+            "emptyDir": {
+              "medium": "Memory",
+              "sizeLimit": "1Gi"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

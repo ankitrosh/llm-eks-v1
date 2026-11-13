@@ -1,0 +1,112 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "v33-coordinator",
+    "namespace": "llm"
+  },
+  "spec": {
+    "replicas": 0,
+    "strategy": {
+      "type": "Recreate"
+    },
+    "selector": {
+      "matchLabels": {
+        "app": "v33-coordinator"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "v33-coordinator"
+        }
+      },
+      "spec": {
+        "nodeSelector": {
+          "eks.amazonaws.com/nodegroup": "cpu-system"
+        },
+        "containers": [
+          {
+            "name": "coordinator",
+            "image": "python:3.12-slim",
+            "command": [
+              "python3",
+              "-u",
+              "/opt/v33/vllm_coordinator.py"
+            ],
+            "env": [
+              {
+                "name": "PORT",
+                "value": "8080"
+              },
+              {
+                "name": "VLLM_UPSTREAM_URL",
+                "value": "http://v33-vllm-api.llm.svc.cluster.local:8000"
+              },
+              {
+                "name": "RECOVERY_STATUS_URL",
+                "value": "http://v33-recovery.llm.svc.cluster.local:8081"
+              },
+              {
+                "name": "REQUIRE_RECOVERY",
+                "value": "true"
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              },
+              "limits": {
+                "memory": "512Mi"
+              }
+            },
+            "volumeMounts": [
+              {
+                "name": "source",
+                "mountPath": "/opt/v33",
+                "readOnly": true
+              },
+              {
+                "name": "model-metadata",
+                "mountPath": "/opt/modelmeta",
+                "readOnly": true
+              }
+            ],
+            "ports": [
+              {
+                "containerPort": 8080
+              }
+            ],
+            "livenessProbe": {
+              "httpGet": {
+                "path": "/healthz",
+                "port": 8080
+              }
+            },
+            "readinessProbe": {
+              "httpGet": {
+                "path": "/readyz",
+                "port": 8080
+              }
+            }
+          }
+        ],
+        "volumes": [
+          {
+            "name": "source",
+            "configMap": {
+              "name": "v33-cpu-source"
+            }
+          },
+          {
+            "name": "model-metadata",
+            "configMap": {
+              "name": "v33-model-metadata"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

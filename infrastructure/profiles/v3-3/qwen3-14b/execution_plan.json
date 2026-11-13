@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "backend": "vllm",
+  "model": "/models/qwen3-14b",
+  "pipeline_parallel_size": 2,
+  "tensor_parallel_size": 1,
+  "nodes": [
+    {
+      "rank": 0,
+      "command": [
+        "vllm",
+        "serve",
+        "/models/qwen3-14b",
+        "--distributed-executor-backend",
+        "mp",
+        "--tensor-parallel-size",
+        "1",
+        "--pipeline-parallel-size",
+        "2",
+        "--nnodes",
+        "2",
+        "--node-rank",
+        "0",
+        "--master-addr",
+        "v33-vllm-rank0.llm.svc.cluster.local",
+        "--master-port",
+        "29501",
+        "--dtype",
+        "bfloat16",
+        "--max-model-len",
+        "2048",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ]
+    },
+    {
+      "rank": 1,
+      "command": [
+        "vllm",
+        "serve",
+        "/models/qwen3-14b",
+        "--distributed-executor-backend",
+        "mp",
+        "--tensor-parallel-size",
+        "1",
+        "--pipeline-parallel-size",
+        "2",
+        "--nnodes",
+        "2",
+        "--node-rank",
+        "1",
+        "--master-addr",
+        "v33-vllm-rank0.llm.svc.cluster.local",
+        "--master-port",
+        "29501",
+        "--dtype",
+        "bfloat16",
+        "--max-model-len",
+        "2048",
+        "--headless"
+      ]
+    }
+  ],
+  "scheduler_policy": {
+    "schema_version": 1,
+    "backend": "vllm",
+    "max_num_seqs": 4,
+    "max_num_batched_tokens": 512,
+    "gpu_memory_utilization": 0.85,
+    "enforce_eager_for_smoke": true
+  },
+  "image": "vllm/vllm-openai@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34"
+}

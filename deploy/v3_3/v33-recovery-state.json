@@ -1,0 +1,11 @@
+{
+  "apiVersion": "v1",
+  "kind": "ConfigMap",
+  "metadata": {
+    "name": "v33-recovery-state",
+    "namespace": "llm"
+  },
+  "data": {
+    "state": "{\"attempt\": 0, \"baseline\": null, \"generation\": 0, \"last_error\": null, \"mode\": \"PAUSED\", \"phase\": \"PAUSED\", \"recoveries\": 0, \"started_at\": null}"
+  }
+}
