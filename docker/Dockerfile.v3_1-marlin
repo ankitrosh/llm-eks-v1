@@ -1,0 +1,54 @@
+ARG BASE_IMAGE=657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:bcd962ac9b7deaf2af31591be0d5d336ba5eff7d7d613f2c072391af48290dce
+
+FROM ${BASE_IMAGE} AS marlin-builder
+
+USER root
+
+# Use CUDA 13.0 toolkit matching PyTorch cu130.
+COPY --from=nvidia/cuda:13.0.3-devel-ubuntu24.04 \
+    /usr/local/cuda-13.0/ /usr/local/cuda-13.0/
+
+ENV CUDA_HOME=/usr/local/cuda-13.0
+ENV PATH=/usr/local/cuda-13.0/bin:${PATH}
+ENV TORCH_CUDA_ARCH_LIST=8.6
+ENV MAX_JOBS=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      build-essential git ninja-build && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch v4.0.0 \
+    https://github.com/ModelCloud/GPTQModel.git \
+    /tmp/gptqmodel-src
+
+COPY scripts/build_marlin_extension.py /tmp/build_marlin_extension.py
+
+RUN nvcc --version && \
+    python /tmp/build_marlin_extension.py
+
+FROM ${BASE_IMAGE}
+
+COPY --from=marlin-builder \
+    /opt/marlin-output/ /opt/marlin-output/
+
+ENV PYTHONPATH=/opt/marlin-output
+
+COPY src/gpu/qwen3_stage_loader.py /app/qwen3_stage_loader.py
+
+RUN python -m py_compile /app/qwen3_stage_loader.py && \
+    python -c "import torch; import gptqmodel_marlin_kernels; print('PASS: Marlin extension imports')"
+
+# V3.1 framework and GPU correctness harness.
+WORKDIR /app
+
+COPY src/llm_runtime/ /app/llm_runtime/
+COPY scripts/v3_1_marlin_gpu_smoke.py \
+     /app/scripts/v3_1_marlin_gpu_smoke.py
+
+RUN python -m py_compile \
+      /app/llm_runtime/providers/v3_1_gptq_marlin_provider.py \
+      /app/llm_runtime/providers/v3_1_configured_stage_factory.py \
+      /app/scripts/v3_1_marlin_gpu_smoke.py
+
+RUN python -c "import torch; from importlib.metadata import version; assert version('gptqmodel') == '4.0.0'; import gptqmodel_marlin_kernels; from gptqmodel.nn_modules.qlinear.marlin import MarlinQuantLinear; print('PASS: V3.1 Marlin runtime imports')"

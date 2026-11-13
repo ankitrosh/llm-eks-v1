@@ -1,0 +1,27 @@
+{
+  "model": {
+    "checkpoint_dir": "/models/model",
+    "quantization": {
+      "provider": "gptq",
+      "options": {
+        "bits": 8,
+        "execution_backend": "marlin"
+      }
+    }
+  },
+  "pipeline": {
+    "num_ranks": 2,
+    "partition": "manual",
+    "layer_counts": [14, 14],
+    "memory": {
+      "gpu_memory_gib": [20.0, 20.0],
+      "reserve_gib": 1.0,
+      "max_active_requests": 1,
+      "max_total_tokens_per_request": 128
+    }
+  },
+  "communication": {
+    "backend": "nccl",
+    "codec": "identity"
+  }
+}

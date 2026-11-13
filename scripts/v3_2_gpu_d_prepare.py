@@ -1,0 +1,208 @@
+"""Generate Phase D Kubernetes source and Jobs.
+
+Uses the validated A+B manifest as a template.
+Does not modify existing V3 or A+B resources.
+"""
+
+from pathlib import Path
+import yaml
+
+
+BASE = Path(
+    "deploy/manifests/v3_2_qwen3_14b_ab.yaml"
+)
+
+RUNNER = Path(
+    "scripts/v3_2_gpu_d_pipeline.py"
+)
+
+TARGET = Path(
+    "deploy/manifests/v3_2_qwen3_14b_d.yaml"
+)
+
+CM_FILE = Path(
+    "/tmp/v32-d-configmap.yaml"
+)
+
+assert BASE.is_file(), BASE
+assert RUNNER.is_file(), RUNNER
+
+modules = sorted(
+    Path("src/llm_runtime").rglob("*.py")
+)
+
+assert any(
+    path.name == "v3_2_block_attention_fast.py"
+    for path in modules
+)
+
+content = {}
+items = []
+
+for n, path in enumerate(modules):
+    key = f"module_{n:03d}"
+
+    content[key] = path.read_text()
+
+    items.append({
+        "key": key,
+        "path": path.relative_to("src").as_posix(),
+    })
+
+content["d_runner"] = RUNNER.read_text()
+
+items.append({
+    "key": "d_runner",
+    "path": "scripts/v3_2_gpu_d_pipeline.py",
+})
+
+bytes_total = sum(
+    len(value.encode("utf-8"))
+    for value in content.values()
+)
+
+assert bytes_total < 900_000, (
+    f"ConfigMap too large: {bytes_total} bytes"
+)
+
+configmap = {
+    "apiVersion": "v1",
+    "kind": "ConfigMap",
+    "metadata": {
+        "namespace": "llm",
+        "name": "v32-d-source",
+    },
+    "data": content,
+}
+
+CM_FILE.write_text(
+    yaml.safe_dump(
+        configmap,
+        sort_keys=False,
+    )
+)
+
+manifest = BASE.read_text()
+
+assert "v32-qwen3-14b-ab" in manifest
+
+manifest = manifest.replace(
+    "v32-qwen3-14b-ab",
+    "v32-qwen3-14b-d",
+)
+
+manifest = manifest.replace(
+    "v32-ab-source",
+    "v32-d-source",
+)
+
+manifest = manifest.replace(
+    "v3_2_gpu_ab_pipeline.py",
+    "v3_2_gpu_d_pipeline.py",
+)
+
+docs = list(
+    yaml.safe_load_all(manifest)
+)
+
+assert len([
+    document for document in docs
+    if document["kind"] == "Service"
+]) == 1
+
+jobs = [
+    document for document in docs
+    if document["kind"] == "Job"
+]
+
+assert len(jobs) == 2
+
+for job in jobs:
+    spec = job["spec"]["template"]["spec"]
+
+    volumes = [
+        volume
+        for volume in spec["volumes"]
+        if volume["name"] == "v32-source"
+    ]
+
+    assert len(volumes) == 1
+
+    volumes[0]["configMap"] = {
+        "name": "v32-d-source",
+        "items": items,
+    }
+
+    container = next(
+        c for c in spec["containers"]
+        if c["name"] == "runtime"
+    )
+
+    container["command"] = [
+        "python3",
+        "-u",
+        "/opt/v32/scripts/v3_2_gpu_d_pipeline.py",
+    ]
+
+    container.pop("args", None)
+
+    assert any(
+        mount["mountPath"] == "/opt/v32"
+        and mount["name"] == "v32-source"
+        for mount in container["volumeMounts"]
+    )
+
+    assert (
+        container["resources"]["limits"]["nvidia.com/gpu"]
+        == "1"
+    )
+
+    env = {
+        item["name"]: item
+        for item in container["env"]
+    }
+
+    overrides = {
+        "PYTHONPATH": "/opt/v32",
+        "V32_PROMPT_TOKENS": "128",
+        "V32_NEW_TOKENS": "64",
+        "D_MAX_ACTIVE": "8",
+        "D_BATCH_SIZES": "1",
+        "D_MAX_INFLIGHT": "2",
+        "D_NUMERIC_CHECK": "0",
+        "D_STAGE0_DIAG": "0",
+        "D_STAGE0_REPLAY": "0",
+        "D_STAGE0_SELFREF": "0",
+        "D_PREFILL_FP32_DIAG": "0",
+        "D_PROFILE_ONLY": "1",
+        "D_LOGIT_DIAG": "0",
+        "V32_ATTN_PARITY_CHECK": "1",
+        "NCCL_IB_DISABLE": "1",
+        "NCCL_SOCKET_IFNAME": "eth0",
+    }
+
+    for name, value in overrides.items():
+        env[name] = {
+            "name": name,
+            "value": value,
+        }
+
+    container["env"] = list(env.values())
+
+    job["spec"]["activeDeadlineSeconds"] = 1600
+
+    print(
+        "Validated:",
+        job["metadata"]["name"],
+    )
+
+TARGET.write_text(
+    yaml.safe_dump_all(
+        docs,
+        sort_keys=False,
+    )
+)
+
+print("PASS: Phase D manifests ready")
+print("CONFIGMAP:", CM_FILE, bytes_total, "bytes")
+print("MANIFEST:", TARGET)

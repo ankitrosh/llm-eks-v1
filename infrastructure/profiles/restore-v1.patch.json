@@ -1,0 +1,204 @@
+[
+  {
+    "op": "replace",
+    "path": "/spec/template",
+    "value": {
+      "metadata": {
+        "labels": {
+          "app": "qwen3"
+        }
+      },
+      "spec": {
+        "affinity": {
+          "podAntiAffinity": {
+            "requiredDuringSchedulingIgnoredDuringExecution": [
+              {
+                "labelSelector": {
+                  "matchLabels": {
+                    "app": "qwen3"
+                  }
+                },
+                "topologyKey": "kubernetes.io/hostname"
+              }
+            ]
+          }
+        },
+        "containers": [
+          {
+            "args": [
+              "set -euo pipefail\n\nexport RANK=\"${HOSTNAME##*-}\"\n\necho \"Starting Qwen3 inference\"\necho \"Rank: $RANK\"\necho \"Master: $MASTER_ADDR:$MASTER_PORT\"\necho \"Model: $MODEL_DIR\"\n\nexec bash /app/docker-entrypoint.sh\n"
+            ],
+            "command": [
+              "/bin/bash",
+              "-lc"
+            ],
+            "env": [
+              {
+                "name": "MODE",
+                "value": "serve"
+              },
+              {
+                "name": "MASTER_ADDR",
+                "value": "qwen3-0.qwen3-headless.llm.svc.cluster.local"
+              },
+              {
+                "name": "MASTER_PORT",
+                "value": "29618"
+              },
+              {
+                "name": "MODEL_DIR",
+                "value": "/models/qwen3-14b"
+              },
+              {
+                "name": "SPLIT",
+                "value": "20"
+              },
+              {
+                "name": "NCCL_SOCKET_IFNAME",
+                "value": "eth0"
+              },
+              {
+                "name": "NCCL_IB_DISABLE",
+                "value": "1"
+              },
+              {
+                "name": "NCCL_DEBUG",
+                "value": "WARN"
+              },
+              {
+                "name": "NCCL_TIMEOUT_SECONDS",
+                "value": "180"
+              },
+              {
+                "name": "REQUEST_TIMEOUT_SECONDS",
+                "value": "240"
+              },
+              {
+                "name": "WARMUP_OUTPUT_TOKENS",
+                "value": "16"
+              },
+              {
+                "name": "PYTHONUNBUFFERED",
+                "value": "1"
+              },
+              {
+                "name": "OMP_NUM_THREADS",
+                "value": "1"
+              }
+            ],
+            "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:6886820e0696db161f219d6b2b45d9851cbb4a9da57a4879333f70fc5f02e718",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "runtime",
+            "ports": [
+              {
+                "containerPort": 8000,
+                "name": "http",
+                "protocol": "TCP"
+              },
+              {
+                "containerPort": 29618,
+                "name": "rendezvous",
+                "protocol": "TCP"
+              }
+            ],
+            "readinessProbe": {
+              "failureThreshold": 2,
+              "httpGet": {
+                "path": "/readyz",
+                "port": 8000,
+                "scheme": "HTTP"
+              },
+              "periodSeconds": 5,
+              "successThreshold": 1,
+              "timeoutSeconds": 3
+            },
+            "resources": {
+              "limits": {
+                "nvidia.com/gpu": "1"
+              },
+              "requests": {
+                "cpu": "1",
+                "memory": "4Gi",
+                "nvidia.com/gpu": "1"
+              }
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/models",
+                "name": "model-files"
+              },
+              {
+                "mountPath": "/dev/shm",
+                "name": "nccl-shm"
+              }
+            ]
+          }
+        ],
+        "dnsPolicy": "ClusterFirst",
+        "initContainers": [
+          {
+            "args": [
+              "set -e\npython -u - <<'PY'\nimport os\nfrom pathlib import Path\nfrom huggingface_hub import snapshot_download\n\nrepo = \"Qwen/Qwen3-14B\"\nrevision = \"40c069824f4251a91eefaf281ebe4c544efd3e18\"\ntarget = Path(\"/models/qwen3-14b\")\nmarker = target / \".model_revision\"\n\ntarget.mkdir(parents=True, exist_ok=True)\n\nshards = list(target.glob(\"model-*.safetensors\"))\n\nif (\n    marker.exists()\n    and marker.read_text().strip() == revision\n    and len(shards) == 8\n    and (target / \"model.safetensors.index.json\").exists()\n):\n    print(\"MODEL CACHE HIT: skipping download\", flush=True)\nelse:\n    print(f\"Downloading {repo} at {revision}\", flush=True)\n\n    snapshot_download(\n        repo_id=repo,\n        revision=revision,\n        local_dir=str(target),\n        allow_patterns=[\n            \"*.safetensors\",\n            \"*.json\",\n            \"tokenizer*\",\n            \"vocab.json\",\n            \"merges.txt\",\n            \"*.model\",\n        ],\n        max_workers=3,\n    )\n\n    shards = list(target.glob(\"model-*.safetensors\"))\n    if len(shards) != 8:\n        raise RuntimeError(\n            f\"Expected 8 shards, found {len(shards)}\"\n        )\n\n    marker.write_text(revision + \"\\n\")\n    print(\"MODEL DOWNLOAD COMPLETE\", flush=True)\n\nprint(\"Model directory:\", target, flush=True)\nprint(\"Shard count:\", len(shards), flush=True)\nPY\n"
+            ],
+            "command": [
+              "/bin/bash",
+              "-lc"
+            ],
+            "env": [
+              {
+                "name": "HF_HOME",
+                "value": "/models/.hf-cache"
+              },
+              {
+                "name": "HF_HUB_DOWNLOAD_TIMEOUT",
+                "value": "120"
+              },
+              {
+                "name": "HF_HUB_ETAG_TIMEOUT",
+                "value": "30"
+              }
+            ],
+            "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:6886820e0696db161f219d6b2b45d9851cbb4a9da57a4879333f70fc5f02e718",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "model-download",
+            "resources": {
+              "limits": {
+                "memory": "4Gi"
+              },
+              "requests": {
+                "cpu": "500m",
+                "memory": "1Gi"
+              }
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/models",
+                "name": "model-files"
+              }
+            ]
+          }
+        ],
+        "nodeSelector": {
+          "pool": "gpu"
+        },
+        "restartPolicy": "Always",
+        "schedulerName": "default-scheduler",
+        "securityContext": {},
+        "terminationGracePeriodSeconds": 30,
+        "volumes": [
+          {
+            "emptyDir": {
+              "medium": "Memory",
+              "sizeLimit": "512Mi"
+            },
+            "name": "nccl-shm"
+          }
+        ]
+      }
+    }
+  }
+]

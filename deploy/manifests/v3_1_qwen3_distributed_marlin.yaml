@@ -1,0 +1,173 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: v31-marlin-two
+  namespace: llm
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: v31-marlin-two
+  ports:
+    - name: rendezvous
+      port: 29500
+      targetPort: 29500
+    - name: control
+      port: 29679
+      targetPort: 29679
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v31-marlin-two
+  namespace: llm
+spec:
+  completionMode: Indexed
+  completions: 2
+  parallelism: 2
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  ttlSecondsAfterFinished: 86400
+
+  template:
+    metadata:
+      labels:
+        app: v31-marlin-two
+
+    spec:
+      subdomain: v31-marlin-two
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 30
+
+      nodeSelector:
+        eks.amazonaws.com/nodegroup: gpu-a10g
+        node.kubernetes.io/instance-type: g5.xlarge
+
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: v31-marlin-two
+              topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: marlin
+          image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline:v3.1-gptq-marlin-r1
+          imagePullPolicy: IfNotPresent
+
+          command: ["/bin/bash", "-lc"]
+          args:
+            - |
+              set -euo pipefail
+
+              export PYTHONPATH=/opt/v31:/app:/opt/marlin-output
+              export HF_HOME=/tmp/huggingface
+              export PYTHONUNBUFFERED=1
+
+              echo "========== RANK ${RANK}/${WORLD_SIZE} =========="
+              nvidia-smi
+
+              echo "========== DOWNLOAD CHECKPOINT =========="
+
+              python - <<'PY'
+              from huggingface_hub import snapshot_download
+
+              snapshot_download(
+                  repo_id="Qwen/Qwen3-0.6B-GPTQ-Int8",
+                  local_dir="/tmp/qwen3-0.6b-gptq",
+                  allow_patterns=[
+                      "config.json",
+                      "*.safetensors",
+                      "*.safetensors.index.json",
+                      "tokenizer.json",
+                      "tokenizer_config.json",
+                      "special_tokens_map.json",
+                      "added_tokens.json",
+                      "vocab.json",
+                      "merges.txt",
+                      "*.model",
+                      "generation_config.json",
+                  ],
+              )
+              PY
+
+              echo "========== EXECUTE DISTRIBUTED MARLIN =========="
+
+              exec python -u \
+                /opt/v31/v3_1_qwen3_distributed_marlin.py \
+                --checkpoint-dir /tmp/qwen3-0.6b-gptq
+
+          env:
+            - name: RANK
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+
+            - name: WORLD_SIZE
+              value: "2"
+
+            - name: MASTER_ADDR
+              value: v31-marlin-two-0.v31-marlin-two.llm.svc.cluster.local
+
+            - name: MASTER_PORT
+              value: "29500"
+
+            - name: V31_CTRL_PORT
+              value: "29679"
+
+            - name: OMP_NUM_THREADS
+              value: "1"
+
+            - name: MKL_NUM_THREADS
+              value: "1"
+
+            - name: NCCL_IB_DISABLE
+              value: "1"
+
+            - name: NCCL_NET
+              value: Socket
+
+            - name: NCCL_SOCKET_IFNAME
+              value: eth0
+
+            - name: NCCL_DEBUG
+              value: INFO
+
+          resources:
+            requests:
+              cpu: "1"
+              memory: 6Gi
+              nvidia.com/gpu: "1"
+
+            limits:
+              cpu: "2"
+              memory: 12Gi
+              nvidia.com/gpu: "1"
+
+          volumeMounts:
+            - name: v31-scripts
+              mountPath: /opt/v31
+              readOnly: true
+
+            - name: nccl-shm
+              mountPath: /dev/shm
+
+      volumes:
+        - name: v31-scripts
+          configMap:
+            name: v31-marlin-two-scripts
+            items:
+              - key: v3_1_qwen3_distributed_marlin.py
+                path: v3_1_qwen3_distributed_marlin.py
+              - key: v3_1_qwen3_independent_reference.py
+                path: v3_1_qwen3_independent_reference.py
+              - key: __init__.py
+                path: llm_runtime/__init__.py
+              - key: v3_1_nrank_transport.py
+                path: llm_runtime/v3_1_nrank_transport.py
+
+        - name: nccl-shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 512Mi

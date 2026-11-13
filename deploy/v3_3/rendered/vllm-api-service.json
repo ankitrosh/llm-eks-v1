@@ -1,0 +1,21 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "v33-vllm-api",
+    "namespace": "llm"
+  },
+  "spec": {
+    "selector": {
+      "app": "v33-vllm",
+      "rank": "0"
+    },
+    "ports": [
+      {
+        "name": "api",
+        "port": 8000,
+        "targetPort": 8000
+      }
+    ]
+  }
+}

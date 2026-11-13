@@ -1,0 +1,71 @@
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "initContainers": [
+          {
+            "name": "model-download",
+            "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:bcd962ac9b7deaf2af31591be0d5d336ba5eff7d7d613f2c072391af48290dce",
+            "command": [
+              "/bin/bash",
+              "-lc"
+            ],
+            "args": [
+              "set -euo pipefail\n\nexport RANK=\"${HOSTNAME##*-}\"\n\necho \"Preparing rank $RANK\"\necho \"Model: $MODEL_REPO\"\necho \"Revision: $MODEL_REVISION\"\n\nexec python -u /app/qwen3_prepare_step.py   --rank \"$RANK\"   --split \"$SPLIT\"   --repo \"$MODEL_REPO\"   --revision \"$MODEL_REVISION\"   --model-dir \"$MODEL_DIR\"   --tokenizer-repo \"$TOKENIZER_REPO\"   --tokenizer-revision \"$TOKENIZER_REVISION\"\n"
+            ],
+            "env": [
+              {
+                "name": "MODEL_REPO",
+                "value": "JunHowie/Qwen3-32B-GPTQ-Int8"
+              },
+              {
+                "name": "MODEL_REVISION",
+                "value": "74e7e07c621c17241654d9a22290d3f9cb08d25b"
+              },
+              {
+                "name": "MODEL_DIR",
+                "value": "/models/qwen3-32b-gptq"
+              },
+              {
+                "name": "SPLIT",
+                "value": "32"
+              },
+              {
+                "name": "TOKENIZER_REPO",
+                "value": "Qwen/Qwen3-32B"
+              },
+              {
+                "name": "TOKENIZER_REVISION",
+                "value": "9216db5781bf21249d130ec9da846c4624c16137"
+              }
+            ]
+          }
+        ],
+        "containers": [
+          {
+            "name": "runtime",
+            "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:bcd962ac9b7deaf2af31591be0d5d336ba5eff7d7d613f2c072391af48290dce",
+            "env": [
+              {
+                "name": "MODEL_DIR",
+                "value": "/models/qwen3-32b-gptq"
+              },
+              {
+                "name": "SPLIT",
+                "value": "32"
+              },
+              {
+                "name": "MODE",
+                "value": "serve"
+              },
+              {
+                "name": "LLM_ATTENTION_BACKEND",
+                "value": "sdpa"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

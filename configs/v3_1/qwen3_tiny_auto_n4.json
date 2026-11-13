@@ -1,0 +1,27 @@
+{
+  "model": {
+    "id": "qwen3-tiny-validation",
+    "num_layers": 6,
+    "layer_weights_gib": [
+      0.25, 0.25, 0.25,
+      0.25, 0.25, 0.25
+    ]
+  },
+  "pipeline": {
+    "num_ranks": 4,
+    "partition": "auto",
+    "memory": {
+      "gpu_memory_gib": [2.79, 2.79, 2.79, 2.79],
+      "reserve_gib": 0.75,
+      "kv_bytes_per_layer_per_token": 4096,
+      "max_total_tokens_per_request": 512,
+      "max_active_requests": 2,
+      "first_stage_gib": 0.15,
+      "last_stage_gib": 0.15
+    }
+  },
+  "communication": {
+    "backend": "gloo_staged",
+    "codec": "identity"
+  }
+}

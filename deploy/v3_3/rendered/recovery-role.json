@@ -1,0 +1,52 @@
+{
+  "apiVersion": "rbac.authorization.k8s.io/v1",
+  "kind": "Role",
+  "metadata": {
+    "name": "v33-recovery",
+    "namespace": "llm"
+  },
+  "rules": [
+    {
+      "apiGroups": [
+        ""
+      ],
+      "resources": [
+        "configmaps"
+      ],
+      "resourceNames": [
+        "v33-recovery-state"
+      ],
+      "verbs": [
+        "get",
+        "patch"
+      ]
+    },
+    {
+      "apiGroups": [
+        ""
+      ],
+      "resources": [
+        "pods"
+      ],
+      "verbs": [
+        "list"
+      ]
+    },
+    {
+      "apiGroups": [
+        "apps"
+      ],
+      "resources": [
+        "deployments/scale"
+      ],
+      "resourceNames": [
+        "v33-vllm-rank0",
+        "v33-vllm-rank1"
+      ],
+      "verbs": [
+        "get",
+        "patch"
+      ]
+    }
+  ]
+}

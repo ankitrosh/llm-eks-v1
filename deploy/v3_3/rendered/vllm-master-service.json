@@ -1,0 +1,23 @@
+{
+  "apiVersion": "v1",
+  "kind": "Service",
+  "metadata": {
+    "name": "v33-vllm-rank0",
+    "namespace": "llm"
+  },
+  "spec": {
+    "selector": {
+      "app": "v33-vllm",
+      "rank": "0"
+    },
+    "ports": [
+      {
+        "name": "master",
+        "port": 29501,
+        "targetPort": 29501
+      }
+    ],
+    "clusterIP": "None",
+    "publishNotReadyAddresses": true
+  }
+}

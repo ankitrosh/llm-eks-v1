@@ -1,0 +1,256 @@
+"""Compare V3.2D stage-0 execution against native HF Qwen3 layers."""
+
+import math
+import os
+
+import torch
+import transformers
+
+from transformers.cache_utils import DynamicCache
+from transformers.masking_utils import create_causal_mask
+
+from llm_runtime.providers.v3_qwen3_stage_only_factory import (
+    Qwen3StageOnlyFactory,
+)
+from llm_runtime.v3_2_kv_storage import BlockKVCache
+from llm_runtime.v3_2_qwen3_stage_prefill import (
+    stage_block_prefill,
+)
+import llm_runtime.v3_2_qwen3_stage_batch as batch_module
+
+from llm_runtime.v3_2_block_attention_fast import (
+    block_decode_attention_fast,
+)
+
+
+PROMPT_LENGTH = int(os.getenv("HF_ORACLE_PROMPT", "128"))
+DECODE_LENGTH = int(os.getenv("HF_ORACLE_DECODE", "16"))
+REQUEST_ID = 90101
+DEVICE = "cuda:0"
+
+
+def metrics(actual, reference):
+    actual = actual.detach().float()
+    reference = reference.detach().float()
+
+    assert actual.shape == reference.shape
+
+    diff = actual - reference
+
+    return (
+        (
+            torch.linalg.vector_norm(diff)
+            / torch.linalg.vector_norm(reference).clamp_min(1e-12)
+        ).item(),
+        diff.abs().max().item(),
+    )
+
+
+@torch.inference_mode()
+def main():
+    if not torch.cuda.is_available():
+        raise RuntimeError("A CUDA GPU is required")
+
+    torch.cuda.set_device(0)
+    torch.set_num_threads(2)
+
+    print(
+        f"HF_ORACLE_ENV torch={torch.__version__} "
+        f"transformers={transformers.__version__} "
+        f"gpu={torch.cuda.get_device_name(0)}",
+        flush=True,
+    )
+
+    model_dir = os.getenv("MODEL_DIR", "/models/qwen3-14b")
+
+    # Load only layers 0–19, reusing the same checkpoint
+    # loader and module weights as our framework.
+    stage = Qwen3StageOnlyFactory(
+        checkpoint_dir=model_dir,
+        device=DEVICE,
+        dtype="bfloat16",
+        split_at=20,
+    )(0)
+
+    # The normal V3.2D runner supplies pipeline layout metadata.
+    # This isolated rank-0 test uses the same two-stage topology.
+    from types import SimpleNamespace
+    stage.layout = SimpleNamespace(world_size=2)
+
+    partial = stage.model
+    model = partial.model
+    owned = tuple(partial.owned_layers)
+
+    assert owned == tuple(range(20))
+    assert stage.rank == 0
+    assert stage.config._attn_implementation == "eager"
+
+    print(
+        f"HF_ORACLE_LOADED layers={owned[0]}..{owned[-1]} "
+        f"gpu_allocated_gib="
+        f"{torch.cuda.memory_allocated() / 2**30:.3f}",
+        flush=True,
+    )
+
+    # Deterministic, valid synthetic token IDs.
+    vocab = stage.config.vocab_size
+    token_ids = tuple(
+        128 + ((7919 * i + 1543) % (vocab - 128))
+        for i in range(PROMPT_LENGTH + DECODE_LENGTH)
+    )
+
+    prompt = token_ids[:PROMPT_LENGTH]
+    forced_tokens = token_ids[PROMPT_LENGTH:]
+
+    # Hugging Face uses its native DynamicCache.
+    hf_cache = DynamicCache(config=stage.config)
+
+    def hf_forward(tokens, start):
+        ids = torch.tensor(
+            [tokens], dtype=torch.long, device=DEVICE
+        )
+        hidden = model.embed_tokens(ids)
+
+        cache_position = torch.arange(
+            start,
+            start + len(tokens),
+            device=DEVICE,
+            dtype=torch.long,
+        )
+
+        position_ids = cache_position.unsqueeze(0)
+
+        rope = model.rotary_emb(hidden, position_ids)
+
+        # Use the same causal-mask utility as HF Qwen3Model.
+        mask = create_causal_mask(
+            config=stage.config,
+            input_embeds=hidden,
+            attention_mask=None,
+            cache_position=cache_position,
+            past_key_values=hf_cache,
+            position_ids=position_ids,
+        )
+
+        for layer_id in owned:
+            hidden = model.layers[layer_id](
+                hidden,
+                attention_mask=mask,
+                position_ids=position_ids,
+                past_key_values=hf_cache,
+                use_cache=True,
+                cache_position=cache_position,
+                position_embeddings=rope,
+            )
+
+        return hidden
+
+    # A separate framework-owned physical KV cache.
+    context_capacity = PROMPT_LENGTH + DECODE_LENGTH + 16
+    block_size = 16
+
+    cache = BlockKVCache(
+        layers=len(owned),
+        capacity_blocks=math.ceil(
+            context_capacity / block_size
+        ),
+        block_size=block_size,
+        kv_heads=stage.config.num_key_value_heads,
+        head_dim=stage.config.head_dim,
+        max_context_tokens=context_capacity,
+        dtype=torch.bfloat16,
+        device=DEVICE,
+    )
+
+    # Match the optimized serving decode attention path.
+    # This assignment affects this test process only.
+    batch_module.block_decode_attention = (
+        block_decode_attention_fast
+    )
+
+    # ---- PREFILL ----
+    hf_prefill = hf_forward(prompt, 0)
+
+    our_prefill = stage_block_prefill(
+        stage,
+        cache,
+        (REQUEST_ID,),
+        (0,),
+        (prompt,),
+    )
+
+    assert our_prefill.lengths == (PROMPT_LENGTH,)
+    assert cache._committed[REQUEST_ID] == PROMPT_LENGTH
+
+    for pos in (0, 31, 63, 127):
+        rel, max_abs = metrics(
+            our_prefill.hidden[0, pos],
+            hf_prefill[0, pos],
+        )
+        print(
+            f"HF_ORACLE_PREFILL position={pos} "
+            f"relative_l2={rel:.8f} "
+            f"max_abs={max_abs:.6f}",
+            flush=True,
+        )
+
+    # ---- FORCED DECODE ----
+    worst_rel = 0.0
+    worst_step = 0
+
+    for step, token in enumerate(forced_tokens, start=1):
+        pos = PROMPT_LENGTH + step - 1
+
+        hf_hidden = hf_forward((token,), pos)
+
+        our_hidden = batch_module.stage_block_decode(
+            stage,
+            cache,
+            (REQUEST_ID,),
+            (token,),
+        )
+
+        assert our_hidden.shape == hf_hidden.shape
+
+        rel, max_abs = metrics(
+            our_hidden[0, -1],
+            hf_hidden[0, -1],
+        )
+
+        if rel > worst_rel:
+            worst_rel = rel
+            worst_step = step
+
+        print(
+            f"HF_ORACLE_DECODE step={step} "
+            f"position={pos} "
+            f"relative_l2={rel:.8f} "
+            f"max_abs={max_abs:.6f}",
+            flush=True,
+        )
+
+    assert cache._committed[REQUEST_ID] == (
+        PROMPT_LENGTH + DECODE_LENGTH
+    )
+
+    assert cache.release_request(REQUEST_ID)
+
+    snapshot = cache.snapshot()
+
+    assert snapshot["requests"] == 0
+    assert snapshot["allocated_blocks"] == 0
+    assert not snapshot["pending_batch"]
+
+    print(
+        f"HF_ORACLE_COMPLETE "
+        f"prompt={PROMPT_LENGTH} "
+        f"forced_decode={DECODE_LENGTH} "
+        f"worst_decode_step={worst_step} "
+        f"worst_relative_l2={worst_rel:.8f} "
+        f"cache_requests={snapshot['requests']}",
+        flush=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

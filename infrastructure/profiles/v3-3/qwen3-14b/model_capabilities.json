@@ -1,0 +1,24 @@
+{
+  "architecture": "Qwen3ForCausalLM",
+  "attention_kind": "causal_grouped_query_attention",
+  "checkpoint_dtype": "bfloat16",
+  "head_dim": 128,
+  "hidden_size": 5120,
+  "intermediate_size": 17408,
+  "kind": "model_capabilities",
+  "kv_heads": 8,
+  "max_position_embeddings": 40960,
+  "model_id": "Qwen/Qwen3-14B",
+  "model_type": "qwen3",
+  "num_layers": 40,
+  "q_heads": 40,
+  "quantization_config": null,
+  "schema_version": 1,
+  "source": {
+    "config_sha256": "e73c3664ca09b10a673fef0c22e8a6b456201d49bd4713c9691f775720e8857a",
+    "index_sha256": "62d7ad35757bae5e7baa452cb1483178b7daa50e869e923226b8da10871f7ebc",
+    "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18"
+  },
+  "tied_embeddings": false,
+  "vocab_size": 151936
+}

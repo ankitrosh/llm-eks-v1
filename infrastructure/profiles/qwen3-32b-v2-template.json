@@ -1,0 +1,226 @@
+{
+  "metadata": {
+    "labels": {
+      "app": "qwen3"
+    }
+  },
+  "spec": {
+    "affinity": {
+      "podAntiAffinity": {
+        "requiredDuringSchedulingIgnoredDuringExecution": [
+          {
+            "labelSelector": {
+              "matchLabels": {
+                "app": "qwen3"
+              }
+            },
+            "topologyKey": "kubernetes.io/hostname"
+          }
+        ]
+      }
+    },
+    "containers": [
+      {
+        "args": [
+          "set -euo pipefail\n\nexport RANK=\"${HOSTNAME##*-}\"\n\necho \"Starting Qwen3 inference\"\necho \"Rank: $RANK\"\necho \"Master: $MASTER_ADDR:$MASTER_PORT\"\necho \"Model: $MODEL_DIR\"\n\nexec bash /app/docker-entrypoint.sh\n"
+        ],
+        "command": [
+          "/bin/bash",
+          "-lc"
+        ],
+        "env": [
+          {
+            "name": "MASTER_ADDR",
+            "value": "qwen3-0.qwen3-headless.llm.svc.cluster.local"
+          },
+          {
+            "name": "MASTER_PORT",
+            "value": "29618"
+          },
+          {
+            "name": "MODEL_DIR",
+            "value": "/models/qwen3-32b-gptq"
+          },
+          {
+            "name": "SPLIT",
+            "value": "32"
+          },
+          {
+            "name": "MODE",
+            "value": "serve"
+          },
+          {
+            "name": "NCCL_SOCKET_IFNAME",
+            "value": "eth0"
+          },
+          {
+            "name": "NCCL_IB_DISABLE",
+            "value": "1"
+          },
+          {
+            "name": "NCCL_DEBUG",
+            "value": "WARN"
+          },
+          {
+            "name": "NCCL_TIMEOUT_SECONDS",
+            "value": "180"
+          },
+          {
+            "name": "REQUEST_TIMEOUT_SECONDS",
+            "value": "240"
+          },
+          {
+            "name": "WARMUP_OUTPUT_TOKENS",
+            "value": "16"
+          },
+          {
+            "name": "PYTHONUNBUFFERED",
+            "value": "1"
+          },
+          {
+            "name": "OMP_NUM_THREADS",
+            "value": "1"
+          },
+          {
+            "name": "LLM_ATTENTION_BACKEND",
+            "value": "sdpa"
+          }
+        ],
+        "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:bcd962ac9b7deaf2af31591be0d5d336ba5eff7d7d613f2c072391af48290dce",
+        "imagePullPolicy": "IfNotPresent",
+        "name": "runtime",
+        "ports": [
+          {
+            "containerPort": 8000,
+            "name": "http",
+            "protocol": "TCP"
+          },
+          {
+            "containerPort": 29618,
+            "name": "rendezvous",
+            "protocol": "TCP"
+          }
+        ],
+        "readinessProbe": {
+          "failureThreshold": 2,
+          "httpGet": {
+            "path": "/readyz",
+            "port": 8000,
+            "scheme": "HTTP"
+          },
+          "periodSeconds": 5,
+          "successThreshold": 1,
+          "timeoutSeconds": 3
+        },
+        "resources": {
+          "limits": {
+            "nvidia.com/gpu": "1"
+          },
+          "requests": {
+            "cpu": "1",
+            "memory": "4Gi",
+            "nvidia.com/gpu": "1"
+          }
+        },
+        "terminationMessagePath": "/dev/termination-log",
+        "terminationMessagePolicy": "File",
+        "volumeMounts": [
+          {
+            "mountPath": "/models",
+            "name": "model-files"
+          },
+          {
+            "mountPath": "/dev/shm",
+            "name": "nccl-shm"
+          }
+        ]
+      }
+    ],
+    "dnsPolicy": "ClusterFirst",
+    "initContainers": [
+      {
+        "args": [
+          "set -euo pipefail\n\nexport RANK=\"${HOSTNAME##*-}\"\n\necho \"Preparing rank $RANK\"\necho \"Model: $MODEL_REPO\"\necho \"Revision: $MODEL_REVISION\"\n\nexec python -u /app/qwen3_prepare_step.py   --rank \"$RANK\"   --split \"$SPLIT\"   --repo \"$MODEL_REPO\"   --revision \"$MODEL_REVISION\"   --model-dir \"$MODEL_DIR\"   --tokenizer-repo \"$TOKENIZER_REPO\"   --tokenizer-revision \"$TOKENIZER_REVISION\"\n"
+        ],
+        "command": [
+          "/bin/bash",
+          "-lc"
+        ],
+        "env": [
+          {
+            "name": "MODEL_REPO",
+            "value": "JunHowie/Qwen3-32B-GPTQ-Int8"
+          },
+          {
+            "name": "MODEL_REVISION",
+            "value": "74e7e07c621c17241654d9a22290d3f9cb08d25b"
+          },
+          {
+            "name": "MODEL_DIR",
+            "value": "/models/qwen3-32b-gptq"
+          },
+          {
+            "name": "SPLIT",
+            "value": "32"
+          },
+          {
+            "name": "TOKENIZER_REPO",
+            "value": "Qwen/Qwen3-32B"
+          },
+          {
+            "name": "TOKENIZER_REVISION",
+            "value": "9216db5781bf21249d130ec9da846c4624c16137"
+          },
+          {
+            "name": "HF_HOME",
+            "value": "/models/.hf-cache"
+          },
+          {
+            "name": "HF_HUB_DOWNLOAD_TIMEOUT",
+            "value": "120"
+          },
+          {
+            "name": "HF_HUB_ETAG_TIMEOUT",
+            "value": "30"
+          }
+        ],
+        "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:bcd962ac9b7deaf2af31591be0d5d336ba5eff7d7d613f2c072391af48290dce",
+        "imagePullPolicy": "IfNotPresent",
+        "name": "model-download",
+        "resources": {
+          "limits": {
+            "memory": "4Gi"
+          },
+          "requests": {
+            "cpu": "500m",
+            "memory": "1Gi"
+          }
+        },
+        "terminationMessagePath": "/dev/termination-log",
+        "terminationMessagePolicy": "File",
+        "volumeMounts": [
+          {
+            "mountPath": "/models",
+            "name": "model-files"
+          }
+        ]
+      }
+    ],
+    "nodeSelector": {
+      "pool": "gpu"
+    },
+    "restartPolicy": "Always",
+    "schedulerName": "default-scheduler",
+    "securityContext": {},
+    "terminationGracePeriodSeconds": 30,
+    "volumes": [
+      {
+        "emptyDir": {
+          "medium": "Memory",
+          "sizeLimit": "512Mi"
+        },
+        "name": "nccl-shm"
+      }
+    ]
+  }
+}
