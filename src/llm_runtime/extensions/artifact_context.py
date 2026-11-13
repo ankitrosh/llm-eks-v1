@@ -91,25 +91,54 @@ def load_plugin_context(
             "Incomplete layer layout"
         )
 
+    container = layout.get("transformer_container")
+
+    if container is not None and (
+        not isinstance(container, str) or not container
+    ):
+        raise ArtifactValidationError(
+            "Invalid transformer container"
+        )
+
+    paths = set()
+
     for index, layer in enumerate(layers):
+        path = (
+            layer.get("module_path")
+            if isinstance(layer, dict)
+            else None
+        )
+
         if (
             not isinstance(layer, dict)
+            or type(layer.get("index")) is not int
             or layer.get("index") != index
-            or layer.get("module_path")
-            != f"model.layers.{index}"
+            or not isinstance(path, str)
+            or not path
+            or path in paths
+            or (
+                container is not None
+                and path != f"{container}.{index}"
+            )
         ):
             raise ArtifactValidationError(
                 f"Invalid layer entry at index {index}"
             )
 
+        paths.add(path)
+
     model_source = model.get("source", {})
     layout_source = layout.get("source", {})
 
-    for key in (
-        "revision",
-        "config_sha256",
-        "index_sha256",
+    if (
+        not isinstance(model_source, dict)
+        or not isinstance(layout_source, dict)
     ):
+        raise ArtifactValidationError(
+            "Invalid artifact provenance"
+        )
+
+    for key in ("revision", "config_sha256"):
         if (
             not model_source.get(key)
             or model_source.get(key)
@@ -118,6 +147,21 @@ def load_plugin_context(
             raise ArtifactValidationError(
                 f"Artifact provenance mismatch: {key}"
             )
+
+    if (
+        model_source.get("index_sha256")
+        != layout_source.get("index_sha256")
+    ):
+        raise ArtifactValidationError(
+            "Checkpoint index provenance mismatch"
+        )
+
+    if require_verified and not model_source.get(
+        "index_sha256"
+    ):
+        raise ArtifactValidationError(
+            "Verified artifacts require a checkpoint index"
+        )
 
     if require_verified:
         if layout.get("verification") != (
