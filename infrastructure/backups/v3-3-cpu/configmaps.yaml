@@ -1,0 +1,732 @@
+apiVersion: v1
+items:
+- apiVersion: v1
+  data:
+    coordinator.py: |
+      import json
+      import os
+      import time
+      from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+      from urllib.error import HTTPError, URLError
+      from urllib.request import Request, urlopen
+
+      RANK_URLS = [
+          url.strip().rstrip("/")
+          for url in os.environ["RANK_URLS"].split(",")
+      ]
+      UPSTREAM = os.environ["UPSTREAM_URL"].rstrip("/")
+      PORT = int(os.environ.get("PORT", "8080"))
+      REQUEST_TIMEOUT = float(os.environ.get("REQUEST_TIMEOUT", "300"))
+      HEALTH_TIMEOUT = 2.0
+
+      if len(RANK_URLS) != 2:
+          raise ValueError("V1 requires exactly two rank endpoints")
+
+
+      def check_pipeline():
+          ranks = []
+
+          for rank, base_url in enumerate(RANK_URLS):
+              result = {"rank": rank, "ready": False}
+
+              try:
+                  with urlopen(
+                      base_url + "/readyz",
+                      timeout=HEALTH_TIMEOUT,
+                  ) as response:
+                      result["ready"] = response.status == 200
+                      result["http_status"] = response.status
+
+              except HTTPError as exc:
+                  result["http_status"] = exc.code
+                  result["error"] = str(exc)
+
+              except Exception as exc:
+                  result["error"] = str(exc)
+
+              ranks.append(result)
+
+          controller = {"phase": "UNAVAILABLE", "ready": False}
+
+          try:
+              with urlopen(
+                  "http://qwen3-recovery.llm.svc.cluster.local:8081/status",
+                  timeout=HEALTH_TIMEOUT,
+              ) as response:
+                  status = json.load(response)
+
+              controller = {
+                  "phase": status.get("phase", "UNKNOWN"),
+                  "generation": status.get("generation"),
+                  "ready": status.get("phase") == "SERVING",
+              }
+
+          except Exception as exc:
+              controller["error"] = str(exc)
+
+          return {
+              "ready": (
+                  all(rank["ready"] for rank in ranks)
+                  and controller["ready"]
+              ),
+              "ranks": ranks,
+              "controller": controller,
+          }
+
+
+      class Handler(BaseHTTPRequestHandler):
+          protocol_version = "HTTP/1.1"
+
+          def send_bytes(self, status, body, content_type="application/json"):
+              self.send_response(status)
+              self.send_header("Content-Type", content_type)
+              self.send_header("Content-Length", str(len(body)))
+              self.end_headers()
+              self.wfile.write(body)
+
+          def send_json(self, status, value):
+              body = json.dumps(value).encode("utf-8")
+              self.send_bytes(status, body)
+
+          def do_GET(self):
+              if self.path == "/healthz":
+                  return self.send_json(200, {"status": "alive"})
+
+              if self.path in ("/readyz", "/status"):
+                  status = check_pipeline()
+
+                  if self.path == "/readyz":
+                      code = 200 if status["ready"] else 503
+                  else:
+                      code = 200
+
+                  return self.send_json(code, status)
+
+              self.send_json(404, {"error": "not found"})
+
+          def do_POST(self):
+              if self.path != "/generate":
+                  return self.send_json(404, {"error": "not found"})
+
+              pipeline = check_pipeline()
+
+              if not pipeline["ready"]:
+                  return self.send_json(
+                      503,
+                      {
+                          "error": "distributed pipeline unavailable",
+                          "pipeline": pipeline,
+                      },
+                  )
+
+              try:
+                  size = int(self.headers.get("Content-Length", "0"))
+
+                  if size <= 0 or size > 1024 * 1024:
+                      return self.send_json(
+                          413, {"error": "invalid request body size"}
+                      )
+
+                  payload = self.rfile.read(size)
+
+                  request = Request(
+                      UPSTREAM + "/generate",
+                      data=payload,
+                      headers={"Content-Type": "application/json"},
+                      method="POST",
+                  )
+
+                  with urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+                      body = response.read(8 * 1024 * 1024 + 1)
+
+                      if len(body) > 8 * 1024 * 1024:
+                          return self.send_json(
+                              502, {"error": "upstream response too large"}
+                          )
+
+                      self.send_bytes(response.status, body)
+
+              except HTTPError as exc:
+                  self.send_bytes(exc.code, exc.read(1024 * 1024))
+
+              except (URLError, TimeoutError, OSError) as exc:
+                  self.send_json(
+                      502,
+                      {"error": "inference upstream failed", "detail": str(exc)},
+                  )
+
+
+      print(f"Coordinator listening on port {PORT}", flush=True)
+      ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+  kind: ConfigMap
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"v1","data":{"coordinator.py":"import json\nimport os\nimport time\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\nfrom urllib.error import HTTPError, URLError\nfrom urllib.request import Request, urlopen\n\nRANK_URLS = [\n    url.strip().rstrip(\"/\")\n    for url in os.environ[\"RANK_URLS\"].split(\",\")\n]\nUPSTREAM = os.environ[\"UPSTREAM_URL\"].rstrip(\"/\")\nPORT = int(os.environ.get(\"PORT\", \"8080\"))\nREQUEST_TIMEOUT = float(os.environ.get(\"REQUEST_TIMEOUT\", \"300\"))\nHEALTH_TIMEOUT = 2.0\n\nif len(RANK_URLS) != 2:\n    raise ValueError(\"V1 requires exactly two rank endpoints\")\n\n\ndef check_pipeline():\n    ranks = []\n\n    for rank, base_url in enumerate(RANK_URLS):\n        result = {\"rank\": rank, \"ready\": False}\n\n        try:\n            with urlopen(\n                base_url + \"/readyz\",\n                timeout=HEALTH_TIMEOUT,\n            ) as response:\n                result[\"ready\"] = response.status == 200\n                result[\"http_status\"] = response.status\n\n        except HTTPError as exc:\n            result[\"http_status\"] = exc.code\n            result[\"error\"] = str(exc)\n\n        except Exception as exc:\n            result[\"error\"] = str(exc)\n\n        ranks.append(result)\n\n    controller = {\"phase\": \"UNAVAILABLE\", \"ready\": False}\n\n    try:\n        with urlopen(\n            \"http://qwen3-recovery.llm.svc.cluster.local:8081/status\",\n            timeout=HEALTH_TIMEOUT,\n        ) as response:\n            status = json.load(response)\n\n        controller = {\n            \"phase\": status.get(\"phase\", \"UNKNOWN\"),\n            \"generation\": status.get(\"generation\"),\n            \"ready\": status.get(\"phase\") == \"SERVING\",\n        }\n\n    except Exception as exc:\n        controller[\"error\"] = str(exc)\n\n    return {\n        \"ready\": (\n            all(rank[\"ready\"] for rank in ranks)\n            and controller[\"ready\"]\n        ),\n        \"ranks\": ranks,\n        \"controller\": controller,\n    }\n\n\nclass Handler(BaseHTTPRequestHandler):\n    protocol_version = \"HTTP/1.1\"\n\n    def send_bytes(self, status, body, content_type=\"application/json\"):\n        self.send_response(status)\n        self.send_header(\"Content-Type\", content_type)\n        self.send_header(\"Content-Length\", str(len(body)))\n        self.end_headers()\n        self.wfile.write(body)\n\n    def send_json(self, status, value):\n        body = json.dumps(value).encode(\"utf-8\")\n        self.send_bytes(status, body)\n\n    def do_GET(self):\n        if self.path == \"/healthz\":\n            return self.send_json(200, {\"status\": \"alive\"})\n\n        if self.path in (\"/readyz\", \"/status\"):\n            status = check_pipeline()\n\n            if self.path == \"/readyz\":\n                code = 200 if status[\"ready\"] else 503\n            else:\n                code = 200\n\n            return self.send_json(code, status)\n\n        self.send_json(404, {\"error\": \"not found\"})\n\n    def do_POST(self):\n        if self.path != \"/generate\":\n            return self.send_json(404, {\"error\": \"not found\"})\n\n        pipeline = check_pipeline()\n\n        if not pipeline[\"ready\"]:\n            return self.send_json(\n                503,\n                {\n                    \"error\": \"distributed pipeline unavailable\",\n                    \"pipeline\": pipeline,\n                },\n            )\n\n        try:\n            size = int(self.headers.get(\"Content-Length\", \"0\"))\n\n            if size \u003c= 0 or size \u003e 1024 * 1024:\n                return self.send_json(\n                    413, {\"error\": \"invalid request body size\"}\n                )\n\n            payload = self.rfile.read(size)\n\n            request = Request(\n                UPSTREAM + \"/generate\",\n                data=payload,\n                headers={\"Content-Type\": \"application/json\"},\n                method=\"POST\",\n            )\n\n            with urlopen(request, timeout=REQUEST_TIMEOUT) as response:\n                body = response.read(8 * 1024 * 1024 + 1)\n\n                if len(body) \u003e 8 * 1024 * 1024:\n                    return self.send_json(\n                        502, {\"error\": \"upstream response too large\"}\n                    )\n\n                self.send_bytes(response.status, body)\n\n        except HTTPError as exc:\n            self.send_bytes(exc.code, exc.read(1024 * 1024))\n\n        except (URLError, TimeoutError, OSError) as exc:\n            self.send_json(\n                502,\n                {\"error\": \"inference upstream failed\", \"detail\": str(exc)},\n            )\n\n\nprint(f\"Coordinator listening on port {PORT}\", flush=True)\nThreadingHTTPServer((\"0.0.0.0\", PORT), Handler).serve_forever()\n"},"kind":"ConfigMap","metadata":{"annotations":{},"name":"qwen3-coordinator-source","namespace":"llm"}}
+    creationTimestamp: "2026-10-31T23:45:40Z"
+    name: qwen3-coordinator-source
+    namespace: llm
+    resourceVersion: "525732"
+    uid: 3284328a-9dc7-41ce-b6db-16fd2d46362c
+- apiVersion: v1
+  data:
+    recovery_controller.py: |
+      #!/usr/bin/env python3
+      """Durable V1 recovery controller for the two-rank NCCL pipeline."""
+
+      import json
+      import os
+      import ssl
+      import threading
+      import time
+      from datetime import datetime, timezone
+      from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+      from pathlib import Path
+      from urllib.error import HTTPError, URLError
+      from urllib.request import Request, urlopen
+
+      NS = "llm"
+      NAME = "qwen3"
+      AUTO_RECOVER = os.getenv("AUTO_RECOVER", "false").lower() == "true"
+
+      SA = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+      API = (
+          f"https://{os.environ['KUBERNETES_SERVICE_HOST']}:"
+          f"{os.getenv('KUBERNETES_SERVICE_PORT_HTTPS', '443')}"
+      )
+      TLS = ssl.create_default_context(cafile=str(SA / "ca.crt"))
+
+      SCALE = f"/apis/apps/v1/namespaces/{NS}/statefulsets/{NAME}/scale"
+      STATE = f"/api/v1/namespaces/{NS}/configmaps/qwen3-recovery-state"
+
+      URLS = [
+          f"http://qwen3-{i}.qwen3-headless.llm.svc.cluster.local:8000/readyz"
+          for i in range(2)
+      ]
+
+      POLL = 5
+      STARTUP_GRACE = 360
+      MAX_ATTEMPTS = 2
+      DELETE_TIMEOUT = 180
+      READY_TIMEOUT = 480
+
+
+      def kube(path, method="GET", payload=None, content_type=None,
+               missing_ok=False):
+          headers = {
+              "Authorization": "Bearer " + (SA / "token").read_text().strip()
+          }
+          body = None
+
+          if payload is not None:
+              body = json.dumps(payload).encode()
+              headers["Content-Type"] = content_type or "application/json"
+
+          request = Request(
+              API + path, data=body, headers=headers, method=method
+          )
+
+          try:
+              with urlopen(request, timeout=12, context=TLS) as response:
+                  return json.load(response)
+          except HTTPError as exc:
+              if missing_ok and exc.code == 404:
+                  return None
+              detail = exc.read(500).decode(errors="replace")
+              raise RuntimeError(
+                  f"Kubernetes API {method} {path}: {exc.code} {detail}"
+              ) from exc
+
+
+      def read_state():
+          cm = kube(STATE)
+          return cm, json.loads(cm["data"]["state"])
+
+
+      def write_state(cm, state):
+          # Optimistic concurrency protection.
+          patch = [
+              {
+                  "op": "test",
+                  "path": "/metadata/resourceVersion",
+                  "value": cm["metadata"]["resourceVersion"],
+              },
+              {
+                  "op": "replace",
+                  "path": "/data/state",
+                  "value": json.dumps(state),
+              },
+          ]
+          return kube(
+              STATE, "PATCH", patch,
+              "application/json-patch+json"
+          )
+
+
+      def scale_get():
+          return int(kube(SCALE)["spec"]["replicas"])
+
+
+      def scale_set(replicas):
+          kube(
+              SCALE, "PATCH",
+              {"spec": {"replicas": replicas}},
+              "application/merge-patch+json"
+          )
+          print(f"Scaled qwen3 to {replicas}", flush=True)
+
+
+      def pod(rank):
+          name = f"qwen3-{rank}"
+
+          info = kube(
+              f"/api/v1/namespaces/{NS}/pods/{name}",
+              missing_ok=True,
+          )
+
+          if info is None:
+              return {
+                  "name": name, "exists": False,
+                  "ready": False, "http_ready": False,
+                  "signature": None,
+              }
+
+          containers = info.get("status", {}).get("containerStatuses", [])
+
+          runtime = next(
+              (c for c in containers if c.get("name") == "runtime"),
+              {},
+          )
+
+          ready = bool(runtime.get("ready", False))
+          http_ready = False
+
+          if ready:
+              try:
+                  with urlopen(URLS[rank], timeout=2) as response:
+                      http_ready = response.status == 200
+              except (HTTPError, URLError, OSError, TimeoutError):
+                  pass
+
+          return {
+              "name": name,
+              "exists": True,
+              "ready": ready,
+              "http_ready": http_ready,
+              "signature": [
+                  info["metadata"]["uid"],
+                  runtime.get("restartCount", 0),
+              ],
+          }
+
+
+      def inspect():
+          workers = [pod(0), pod(1)]
+          desired = scale_get()
+
+          return {
+              "desired": desired,
+              "workers": workers,
+              "signature": [w["signature"] for w in workers],
+              "healthy": (
+                  desired == 2
+                  and all(
+                      w["ready"] and w["http_ready"]
+                      for w in workers
+                  )
+              ),
+          }
+
+
+      class Watchdog:
+          def __init__(self):
+              self.lock = threading.Lock()
+              self.phase = "STARTING"
+              self.reason = "Waiting for first inspection"
+              self.snapshot = {}
+              self.state = {}
+              self.failures = 0
+              self.started = time.monotonic()
+              self.error = None
+
+          def display(self, phase, reason, snapshot=None,
+                      state=None, error=None):
+              with self.lock:
+                  self.phase = phase
+                  self.reason = reason
+
+                  if snapshot is not None:
+                      self.snapshot = snapshot
+                  if state is not None:
+                      self.state = dict(state)
+
+                  self.error = error
+
+          def status(self):
+              with self.lock:
+                  state = self.state
+                  snapshot = self.snapshot
+
+                  return {
+                      "phase": self.phase,
+                      "reason": self.reason,
+                      "auto_recover": AUTO_RECOVER,
+                      "mode": state.get("mode", "UNKNOWN"),
+                      "generation": state.get("generation"),
+                      "recoveries_completed": state.get("recoveries", 0),
+                      "recovery_attempt": state.get("attempt", 0),
+                      "last_recovery_seconds": state.get(
+                          "last_recovery_seconds"
+                      ),
+                      "failed_checks": self.failures,
+                      "desired_replicas": snapshot.get("desired"),
+                      "workers": snapshot.get("workers", []),
+                      "last_error": self.error or state.get("last_error"),
+                  }
+
+          def check_intent(self):
+              _, state = read_state()
+              if (
+                  state["mode"] != "RUNNING"
+                  or state["phase"] != "RECOVERING"
+              ):
+                  raise InterruptedError("Recovery intent changed")
+              return state
+
+          def recover(self):
+              # Safe to invoke again after controller-process replacement.
+              while True:
+                  cm, state = read_state()
+
+                  if (
+                      state["mode"] != "RUNNING"
+                      or state["phase"] != "RECOVERING"
+                  ):
+                      return
+
+                  attempt = int(state.get("attempt", 0))
+
+                  if attempt == 0:
+                      state["attempt"] = 1
+                      write_state(cm, state)
+                      attempt = 1
+
+                  self.display(
+                      "RECOVERING",
+                      f"Restarting NCCL group, attempt {attempt}",
+                      state=state,
+                  )
+
+                  try:
+                      self.check_intent()
+
+                      scale_set(0)
+
+                      deadline = time.monotonic() + DELETE_TIMEOUT
+
+                      while time.monotonic() < deadline:
+                          self.check_intent()
+
+                          if not pod(0)["exists"] and not pod(1)["exists"]:
+                              break
+
+                          time.sleep(3)
+                      else:
+                          raise TimeoutError(
+                              "Old pods not deleted; refusing overlap"
+                          )
+
+                      self.check_intent()
+                      scale_set(2)
+
+                      deadline = time.monotonic() + READY_TIMEOUT
+
+                      while time.monotonic() < deadline:
+                          self.check_intent()
+                          snapshot = inspect()
+
+                          self.display(
+                              "RECOVERING",
+                              "Waiting for fresh NCCL group",
+                              snapshot=snapshot,
+                          )
+
+                          if snapshot["healthy"]:
+                              cm, latest = read_state()
+
+                              if (
+                                  latest["mode"] != "RUNNING"
+                                  or latest["phase"] != "RECOVERING"
+                              ):
+                                  raise InterruptedError(
+                                      "Intent changed before commit"
+                                  )
+
+                              duration = round(
+                                  time.time() - latest["started_at"], 2
+                              )
+
+                              latest.update(
+                                  phase="SERVING",
+                                  baseline=snapshot["signature"],
+                                  recoveries=latest["recoveries"] + 1,
+                                  attempt=0,
+                                  started_at=None,
+                                  last_error=None,
+                                  last_recovery_seconds=duration,
+                                  last_completed_at=datetime.now(
+                                      timezone.utc
+                                  ).isoformat(),
+                              )
+
+                              write_state(cm, latest)
+
+                              self.failures = 0
+                              self.display(
+                                  "SERVING",
+                                  "Fresh NCCL group ready",
+                                  snapshot=snapshot,
+                                  state=latest,
+                              )
+
+                              print(
+                                  f"Recovery generation "
+                                  f"{latest['generation']} succeeded "
+                                  f"in {duration}s",
+                                  flush=True,
+                              )
+                              return
+
+                          time.sleep(5)
+
+                      raise TimeoutError(
+                          "New NCCL group did not become ready"
+                      )
+
+                  except InterruptedError as exc:
+                      print(str(exc), flush=True)
+                      return
+
+                  except Exception as exc:
+                      print(
+                          f"Recovery attempt {attempt} failed: {exc}",
+                          flush=True,
+                      )
+
+                      try:
+                          cm, latest = read_state()
+
+                          if (
+                              latest["mode"] != "RUNNING"
+                              or latest["phase"] != "RECOVERING"
+                          ):
+                              return
+
+                          latest["last_error"] = str(exc)
+
+                          if attempt >= MAX_ATTEMPTS:
+                              latest["phase"] = "FAILED"
+                              write_state(cm, latest)
+
+                              self.display(
+                                  "FAILED",
+                                  "Recovery attempts exhausted",
+                                  state=latest,
+                                  error=str(exc),
+                              )
+                              return
+
+                          latest["attempt"] = attempt + 1
+                          write_state(cm, latest)
+
+                      except Exception as write_exc:
+                          self.display(
+                              "DEGRADED",
+                              "Unable to persist recovery failure",
+                              error=str(write_exc),
+                          )
+                          return
+
+                      time.sleep(10)
+
+          def tick(self):
+              cm, state = read_state()
+
+              if state["mode"] == "PAUSED":
+                  self.failures = 0
+                  self.display(
+                      "PAUSED", "Operator pause intent", state=state
+                  )
+                  return
+
+              if state["phase"] == "FAILED":
+                  self.display(
+                      "FAILED", "Operator intervention required",
+                      state=state,
+                  )
+                  return
+
+              if state["phase"] == "RECOVERING":
+                  self.display(
+                      "RECOVERING",
+                      "Resuming durable recovery",
+                      state=state,
+                  )
+
+                  if AUTO_RECOVER:
+                      self.recover()
+                  return
+
+              snapshot = inspect()
+              baseline = state.get("baseline")
+
+              if snapshot["desired"] == 0:
+                  # No durable recovery intent: treat scale-to-zero as pause.
+                  state.update(
+                      mode="PAUSED",
+                      phase="PAUSED",
+                      baseline=None,
+                  )
+                  write_state(cm, state)
+
+                  self.display(
+                      "PAUSED",
+                      "Scaled to zero outside recovery",
+                      snapshot=snapshot,
+                      state=state,
+                  )
+                  return
+
+              same_group = (
+                  baseline is None
+                  or baseline == snapshot["signature"]
+              )
+
+              if snapshot["healthy"] and same_group:
+                  self.failures = 0
+                  self.started = time.monotonic()
+
+                  if (
+                      state["phase"] != "SERVING"
+                      or baseline is None
+                  ):
+                      state.update(
+                          phase="SERVING",
+                          baseline=snapshot["signature"],
+                      )
+                      write_state(cm, state)
+
+                  self.display(
+                      "SERVING",
+                      "Both ranks ready; identities match",
+                      snapshot=snapshot,
+                      state=state,
+                  )
+                  return
+
+              if (
+                  state["phase"] == "STARTING"
+                  and baseline is None
+                  and time.monotonic() - self.started < STARTUP_GRACE
+              ):
+                  self.display(
+                      "STARTING",
+                      "Waiting for model/NCCL warmup",
+                      snapshot=snapshot,
+                      state=state,
+                  )
+                  return
+
+              self.failures += 1
+
+              self.display(
+                  "DEGRADED",
+                  "Worker unavailable or identity changed",
+                  snapshot=snapshot,
+                  state=state,
+              )
+
+              if AUTO_RECOVER and self.failures >= 3:
+                  state.update(
+                      phase="RECOVERING",
+                      generation=state["generation"] + 1,
+                      attempt=0,
+                      started_at=time.time(),
+                      last_error=None,
+                      recovery_reason="Worker failure or identity change",
+                  )
+
+                  # Persist intent BEFORE scaling workers to zero.
+                  write_state(cm, state)
+
+                  print(
+                      f"Recovery generation {state['generation']} started",
+                      flush=True,
+                  )
+
+                  self.recover()
+
+          def run(self):
+              while True:
+                  try:
+                      self.tick()
+                  except Exception as exc:
+                      self.display(
+                          "DEGRADED",
+                          "Controller inspection/API error",
+                          error=str(exc),
+                      )
+                      print(
+                          f"Watchdog error: {exc!r}",
+                          flush=True,
+                      )
+
+                  time.sleep(POLL)
+
+
+      watchdog = Watchdog()
+
+
+      class Handler(BaseHTTPRequestHandler):
+          def do_GET(self):
+              if self.path == "/healthz":
+                  code, payload = 200, {"status": "alive"}
+              elif self.path == "/status":
+                  code, payload = 200, watchdog.status()
+              else:
+                  code, payload = 404, {"error": "not found"}
+
+              data = json.dumps(payload).encode()
+
+              self.send_response(code)
+              self.send_header("Content-Type", "application/json")
+              self.send_header("Content-Length", str(len(data)))
+              self.end_headers()
+              self.wfile.write(data)
+
+
+      threading.Thread(
+          target=watchdog.run, daemon=True
+      ).start()
+
+      print(
+          f"Durable watchdog running; AUTO_RECOVER={AUTO_RECOVER}",
+          flush=True,
+      )
+
+      ThreadingHTTPServer(
+          ("0.0.0.0", 8081), Handler
+      ).serve_forever()
+  kind: ConfigMap
+  metadata:
+    annotations:
+      kubectl.kubernetes.io/last-applied-configuration: |
+        {"apiVersion":"v1","data":{"recovery_controller.py":"#!/usr/bin/env python3\n\"\"\"Durable V1 recovery controller for the two-rank NCCL pipeline.\"\"\"\n\nimport json\nimport os\nimport ssl\nimport threading\nimport time\nfrom datetime import datetime, timezone\nfrom http.server import BaseHTTPRequestHandler, ThreadingHTTPServer\nfrom pathlib import Path\nfrom urllib.error import HTTPError, URLError\nfrom urllib.request import Request, urlopen\n\nNS = \"llm\"\nNAME = \"qwen3\"\nAUTO_RECOVER = os.getenv(\"AUTO_RECOVER\", \"false\").lower() == \"true\"\n\nSA = Path(\"/var/run/secrets/kubernetes.io/serviceaccount\")\nAPI = (\n    f\"https://{os.environ['KUBERNETES_SERVICE_HOST']}:\"\n    f\"{os.getenv('KUBERNETES_SERVICE_PORT_HTTPS', '443')}\"\n)\nTLS = ssl.create_default_context(cafile=str(SA / \"ca.crt\"))\n\nSCALE = f\"/apis/apps/v1/namespaces/{NS}/statefulsets/{NAME}/scale\"\nSTATE = f\"/api/v1/namespaces/{NS}/configmaps/qwen3-recovery-state\"\n\nURLS = [\n    f\"http://qwen3-{i}.qwen3-headless.llm.svc.cluster.local:8000/readyz\"\n    for i in range(2)\n]\n\nPOLL = 5\nSTARTUP_GRACE = 360\nMAX_ATTEMPTS = 2\nDELETE_TIMEOUT = 180\nREADY_TIMEOUT = 480\n\n\ndef kube(path, method=\"GET\", payload=None, content_type=None,\n         missing_ok=False):\n    headers = {\n        \"Authorization\": \"Bearer \" + (SA / \"token\").read_text().strip()\n    }\n    body = None\n\n    if payload is not None:\n        body = json.dumps(payload).encode()\n        headers[\"Content-Type\"] = content_type or \"application/json\"\n\n    request = Request(\n        API + path, data=body, headers=headers, method=method\n    )\n\n    try:\n        with urlopen(request, timeout=12, context=TLS) as response:\n            return json.load(response)\n    except HTTPError as exc:\n        if missing_ok and exc.code == 404:\n            return None\n        detail = exc.read(500).decode(errors=\"replace\")\n        raise RuntimeError(\n            f\"Kubernetes API {method} {path}: {exc.code} {detail}\"\n        ) from exc\n\n\ndef read_state():\n    cm = kube(STATE)\n    return cm, json.loads(cm[\"data\"][\"state\"])\n\n\ndef write_state(cm, state):\n    # Optimistic concurrency protection.\n    patch = [\n        {\n            \"op\": \"test\",\n            \"path\": \"/metadata/resourceVersion\",\n            \"value\": cm[\"metadata\"][\"resourceVersion\"],\n        },\n        {\n            \"op\": \"replace\",\n            \"path\": \"/data/state\",\n            \"value\": json.dumps(state),\n        },\n    ]\n    return kube(\n        STATE, \"PATCH\", patch,\n        \"application/json-patch+json\"\n    )\n\n\ndef scale_get():\n    return int(kube(SCALE)[\"spec\"][\"replicas\"])\n\n\ndef scale_set(replicas):\n    kube(\n        SCALE, \"PATCH\",\n        {\"spec\": {\"replicas\": replicas}},\n        \"application/merge-patch+json\"\n    )\n    print(f\"Scaled qwen3 to {replicas}\", flush=True)\n\n\ndef pod(rank):\n    name = f\"qwen3-{rank}\"\n\n    info = kube(\n        f\"/api/v1/namespaces/{NS}/pods/{name}\",\n        missing_ok=True,\n    )\n\n    if info is None:\n        return {\n            \"name\": name, \"exists\": False,\n            \"ready\": False, \"http_ready\": False,\n            \"signature\": None,\n        }\n\n    containers = info.get(\"status\", {}).get(\"containerStatuses\", [])\n\n    runtime = next(\n        (c for c in containers if c.get(\"name\") == \"runtime\"),\n        {},\n    )\n\n    ready = bool(runtime.get(\"ready\", False))\n    http_ready = False\n\n    if ready:\n        try:\n            with urlopen(URLS[rank], timeout=2) as response:\n                http_ready = response.status == 200\n        except (HTTPError, URLError, OSError, TimeoutError):\n            pass\n\n    return {\n        \"name\": name,\n        \"exists\": True,\n        \"ready\": ready,\n        \"http_ready\": http_ready,\n        \"signature\": [\n            info[\"metadata\"][\"uid\"],\n            runtime.get(\"restartCount\", 0),\n        ],\n    }\n\n\ndef inspect():\n    workers = [pod(0), pod(1)]\n    desired = scale_get()\n\n    return {\n        \"desired\": desired,\n        \"workers\": workers,\n        \"signature\": [w[\"signature\"] for w in workers],\n        \"healthy\": (\n            desired == 2\n            and all(\n                w[\"ready\"] and w[\"http_ready\"]\n                for w in workers\n            )\n        ),\n    }\n\n\nclass Watchdog:\n    def __init__(self):\n        self.lock = threading.Lock()\n        self.phase = \"STARTING\"\n        self.reason = \"Waiting for first inspection\"\n        self.snapshot = {}\n        self.state = {}\n        self.failures = 0\n        self.started = time.monotonic()\n        self.error = None\n\n    def display(self, phase, reason, snapshot=None,\n                state=None, error=None):\n        with self.lock:\n            self.phase = phase\n            self.reason = reason\n\n            if snapshot is not None:\n                self.snapshot = snapshot\n            if state is not None:\n                self.state = dict(state)\n\n            self.error = error\n\n    def status(self):\n        with self.lock:\n            state = self.state\n            snapshot = self.snapshot\n\n            return {\n                \"phase\": self.phase,\n                \"reason\": self.reason,\n                \"auto_recover\": AUTO_RECOVER,\n                \"mode\": state.get(\"mode\", \"UNKNOWN\"),\n                \"generation\": state.get(\"generation\"),\n                \"recoveries_completed\": state.get(\"recoveries\", 0),\n                \"recovery_attempt\": state.get(\"attempt\", 0),\n                \"last_recovery_seconds\": state.get(\n                    \"last_recovery_seconds\"\n                ),\n                \"failed_checks\": self.failures,\n                \"desired_replicas\": snapshot.get(\"desired\"),\n                \"workers\": snapshot.get(\"workers\", []),\n                \"last_error\": self.error or state.get(\"last_error\"),\n            }\n\n    def check_intent(self):\n        _, state = read_state()\n        if (\n            state[\"mode\"] != \"RUNNING\"\n            or state[\"phase\"] != \"RECOVERING\"\n        ):\n            raise InterruptedError(\"Recovery intent changed\")\n        return state\n\n    def recover(self):\n        # Safe to invoke again after controller-process replacement.\n        while True:\n            cm, state = read_state()\n\n            if (\n                state[\"mode\"] != \"RUNNING\"\n                or state[\"phase\"] != \"RECOVERING\"\n            ):\n                return\n\n            attempt = int(state.get(\"attempt\", 0))\n\n            if attempt == 0:\n                state[\"attempt\"] = 1\n                write_state(cm, state)\n                attempt = 1\n\n            self.display(\n                \"RECOVERING\",\n                f\"Restarting NCCL group, attempt {attempt}\",\n                state=state,\n            )\n\n            try:\n                self.check_intent()\n\n                scale_set(0)\n\n                deadline = time.monotonic() + DELETE_TIMEOUT\n\n                while time.monotonic() \u003c deadline:\n                    self.check_intent()\n\n                    if not pod(0)[\"exists\"] and not pod(1)[\"exists\"]:\n                        break\n\n                    time.sleep(3)\n                else:\n                    raise TimeoutError(\n                        \"Old pods not deleted; refusing overlap\"\n                    )\n\n                self.check_intent()\n                scale_set(2)\n\n                deadline = time.monotonic() + READY_TIMEOUT\n\n                while time.monotonic() \u003c deadline:\n                    self.check_intent()\n                    snapshot = inspect()\n\n                    self.display(\n                        \"RECOVERING\",\n                        \"Waiting for fresh NCCL group\",\n                        snapshot=snapshot,\n                    )\n\n                    if snapshot[\"healthy\"]:\n                        cm, latest = read_state()\n\n                        if (\n                            latest[\"mode\"] != \"RUNNING\"\n                            or latest[\"phase\"] != \"RECOVERING\"\n                        ):\n                            raise InterruptedError(\n                                \"Intent changed before commit\"\n                            )\n\n                        duration = round(\n                            time.time() - latest[\"started_at\"], 2\n                        )\n\n                        latest.update(\n                            phase=\"SERVING\",\n                            baseline=snapshot[\"signature\"],\n                            recoveries=latest[\"recoveries\"] + 1,\n                            attempt=0,\n                            started_at=None,\n                            last_error=None,\n                            last_recovery_seconds=duration,\n                            last_completed_at=datetime.now(\n                                timezone.utc\n                            ).isoformat(),\n                        )\n\n                        write_state(cm, latest)\n\n                        self.failures = 0\n                        self.display(\n                            \"SERVING\",\n                            \"Fresh NCCL group ready\",\n                            snapshot=snapshot,\n                            state=latest,\n                        )\n\n                        print(\n                            f\"Recovery generation \"\n                            f\"{latest['generation']} succeeded \"\n                            f\"in {duration}s\",\n                            flush=True,\n                        )\n                        return\n\n                    time.sleep(5)\n\n                raise TimeoutError(\n                    \"New NCCL group did not become ready\"\n                )\n\n            except InterruptedError as exc:\n                print(str(exc), flush=True)\n                return\n\n            except Exception as exc:\n                print(\n                    f\"Recovery attempt {attempt} failed: {exc}\",\n                    flush=True,\n                )\n\n                try:\n                    cm, latest = read_state()\n\n                    if (\n                        latest[\"mode\"] != \"RUNNING\"\n                        or latest[\"phase\"] != \"RECOVERING\"\n                    ):\n                        return\n\n                    latest[\"last_error\"] = str(exc)\n\n                    if attempt \u003e= MAX_ATTEMPTS:\n                        latest[\"phase\"] = \"FAILED\"\n                        write_state(cm, latest)\n\n                        self.display(\n                            \"FAILED\",\n                            \"Recovery attempts exhausted\",\n                            state=latest,\n                            error=str(exc),\n                        )\n                        return\n\n                    latest[\"attempt\"] = attempt + 1\n                    write_state(cm, latest)\n\n                except Exception as write_exc:\n                    self.display(\n                        \"DEGRADED\",\n                        \"Unable to persist recovery failure\",\n                        error=str(write_exc),\n                    )\n                    return\n\n                time.sleep(10)\n\n    def tick(self):\n        cm, state = read_state()\n\n        if state[\"mode\"] == \"PAUSED\":\n            self.failures = 0\n            self.display(\n                \"PAUSED\", \"Operator pause intent\", state=state\n            )\n            return\n\n        if state[\"phase\"] == \"FAILED\":\n            self.display(\n                \"FAILED\", \"Operator intervention required\",\n                state=state,\n            )\n            return\n\n        if state[\"phase\"] == \"RECOVERING\":\n            self.display(\n                \"RECOVERING\",\n                \"Resuming durable recovery\",\n                state=state,\n            )\n\n            if AUTO_RECOVER:\n                self.recover()\n            return\n\n        snapshot = inspect()\n        baseline = state.get(\"baseline\")\n\n        if snapshot[\"desired\"] == 0:\n            # No durable recovery intent: treat scale-to-zero as pause.\n            state.update(\n                mode=\"PAUSED\",\n                phase=\"PAUSED\",\n                baseline=None,\n            )\n            write_state(cm, state)\n\n            self.display(\n                \"PAUSED\",\n                \"Scaled to zero outside recovery\",\n                snapshot=snapshot,\n                state=state,\n            )\n            return\n\n        same_group = (\n            baseline is None\n            or baseline == snapshot[\"signature\"]\n        )\n\n        if snapshot[\"healthy\"] and same_group:\n            self.failures = 0\n            self.started = time.monotonic()\n\n            if (\n                state[\"phase\"] != \"SERVING\"\n                or baseline is None\n            ):\n                state.update(\n                    phase=\"SERVING\",\n                    baseline=snapshot[\"signature\"],\n                )\n                write_state(cm, state)\n\n            self.display(\n                \"SERVING\",\n                \"Both ranks ready; identities match\",\n                snapshot=snapshot,\n                state=state,\n            )\n            return\n\n        if (\n            state[\"phase\"] == \"STARTING\"\n            and baseline is None\n            and time.monotonic() - self.started \u003c STARTUP_GRACE\n        ):\n            self.display(\n                \"STARTING\",\n                \"Waiting for model/NCCL warmup\",\n                snapshot=snapshot,\n                state=state,\n            )\n            return\n\n        self.failures += 1\n\n        self.display(\n            \"DEGRADED\",\n            \"Worker unavailable or identity changed\",\n            snapshot=snapshot,\n            state=state,\n        )\n\n        if AUTO_RECOVER and self.failures \u003e= 3:\n            state.update(\n                phase=\"RECOVERING\",\n                generation=state[\"generation\"] + 1,\n                attempt=0,\n                started_at=time.time(),\n                last_error=None,\n                recovery_reason=\"Worker failure or identity change\",\n            )\n\n            # Persist intent BEFORE scaling workers to zero.\n            write_state(cm, state)\n\n            print(\n                f\"Recovery generation {state['generation']} started\",\n                flush=True,\n            )\n\n            self.recover()\n\n    def run(self):\n        while True:\n            try:\n                self.tick()\n            except Exception as exc:\n                self.display(\n                    \"DEGRADED\",\n                    \"Controller inspection/API error\",\n                    error=str(exc),\n                )\n                print(\n                    f\"Watchdog error: {exc!r}\",\n                    flush=True,\n                )\n\n            time.sleep(POLL)\n\n\nwatchdog = Watchdog()\n\n\nclass Handler(BaseHTTPRequestHandler):\n    def do_GET(self):\n        if self.path == \"/healthz\":\n            code, payload = 200, {\"status\": \"alive\"}\n        elif self.path == \"/status\":\n            code, payload = 200, watchdog.status()\n        else:\n            code, payload = 404, {\"error\": \"not found\"}\n\n        data = json.dumps(payload).encode()\n\n        self.send_response(code)\n        self.send_header(\"Content-Type\", \"application/json\")\n        self.send_header(\"Content-Length\", str(len(data)))\n        self.end_headers()\n        self.wfile.write(data)\n\n\nthreading.Thread(\n    target=watchdog.run, daemon=True\n).start()\n\nprint(\n    f\"Durable watchdog running; AUTO_RECOVER={AUTO_RECOVER}\",\n    flush=True,\n)\n\nThreadingHTTPServer(\n    (\"0.0.0.0\", 8081), Handler\n).serve_forever()\n"},"kind":"ConfigMap","metadata":{"annotations":{},"name":"qwen3-recovery-source","namespace":"llm"}}
+    creationTimestamp: "2026-10-31T23:58:52Z"
+    name: qwen3-recovery-source
+    namespace: llm
+    resourceVersion: "544030"
+    uid: 7b655e72-9540-46eb-811c-1c19fb51ea07
+kind: List
+metadata:
+  resourceVersion: ""

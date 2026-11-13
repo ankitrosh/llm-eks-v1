@@ -1,0 +1,847 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "annotations": {
+                    "batch.kubernetes.io/job-completion-index": "0"
+                },
+                "creationTimestamp": "2026-11-05T04:18:07Z",
+                "generateName": "v3-gpt2-dist-0-",
+                "generation": 1,
+                "labels": {
+                    "app": "v3-gpt2-dist",
+                    "batch.kubernetes.io/controller-uid": "aaf5ddaa-8fc1-439c-80d7-78db87a2bc80",
+                    "batch.kubernetes.io/job-completion-index": "0",
+                    "batch.kubernetes.io/job-name": "v3-gpt2-dist",
+                    "controller-uid": "aaf5ddaa-8fc1-439c-80d7-78db87a2bc80",
+                    "job-name": "v3-gpt2-dist",
+                    "topology.kubernetes.io/region": "us-east-2",
+                    "topology.kubernetes.io/zone": "us-east-2b"
+                },
+                "name": "v3-gpt2-dist-0-nm6kp",
+                "namespace": "llm",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "batch/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Job",
+                        "name": "v3-gpt2-dist",
+                        "uid": "aaf5ddaa-8fc1-439c-80d7-78db87a2bc80"
+                    }
+                ],
+                "resourceVersion": "1599000",
+                "uid": "01cd33ad-822b-4d12-b033-410e065fbcbf"
+            },
+            "spec": {
+                "affinity": {
+                    "podAntiAffinity": {
+                        "requiredDuringSchedulingIgnoredDuringExecution": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "v3-gpt2-dist"
+                                    }
+                                },
+                                "topologyKey": "kubernetes.io/hostname"
+                            }
+                        ]
+                    }
+                },
+                "containers": [
+                    {
+                        "command": [
+                            "python",
+                            "/workspace/v3_distributed_extension_integration.py"
+                        ],
+                        "env": [
+                            {
+                                "name": "PYTHONPATH",
+                                "value": "/workspace/src:/workspace:/app:/app/v3"
+                            },
+                            {
+                                "name": "MASTER_ADDR",
+                                "value": "v3-gpt2-dist-0.v3-gpt2-dist-headless.llm.svc.cluster.local"
+                            },
+                            {
+                                "name": "MASTER_PORT",
+                                "value": "29618"
+                            },
+                            {
+                                "name": "WORLD_SIZE",
+                                "value": "2"
+                            },
+                            {
+                                "name": "NCCL_SOCKET_IFNAME",
+                                "value": "eth0"
+                            },
+                            {
+                                "name": "NCCL_IB_DISABLE",
+                                "value": "1"
+                            },
+                            {
+                                "name": "JOB_COMPLETION_INDEX",
+                                "valueFrom": {
+                                    "fieldRef": {
+                                        "apiVersion": "v1",
+                                        "fieldPath": "metadata.labels['batch.kubernetes.io/job-completion-index']"
+                                    }
+                                }
+                            }
+                        ],
+                        "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747",
+                        "imagePullPolicy": "IfNotPresent",
+                        "name": "runtime",
+                        "resources": {
+                            "limits": {
+                                "nvidia.com/gpu": "1"
+                            },
+                            "requests": {
+                                "nvidia.com/gpu": "1"
+                            }
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File",
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/workspace",
+                                "name": "test-code",
+                                "readOnly": true
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-rxjw2",
+                                "readOnly": true
+                            }
+                        ]
+                    }
+                ],
+                "dnsPolicy": "ClusterFirst",
+                "enableServiceLinks": true,
+                "hostname": "v3-gpt2-dist-0",
+                "nodeName": "ip-192-168-50-31.us-east-2.compute.internal",
+                "nodeSelector": {
+                    "pool": "gpu"
+                },
+                "preemptionPolicy": "PreemptLowerPriority",
+                "priority": 0,
+                "restartPolicy": "Never",
+                "schedulerName": "default-scheduler",
+                "securityContext": {},
+                "serviceAccount": "default",
+                "serviceAccountName": "default",
+                "subdomain": "v3-gpt2-dist-headless",
+                "terminationGracePeriodSeconds": 30,
+                "tolerations": [
+                    {
+                        "operator": "Exists"
+                    },
+                    {
+                        "effect": "NoSchedule",
+                        "key": "nvidia.com/gpu",
+                        "operator": "Exists"
+                    }
+                ],
+                "volumes": [
+                    {
+                        "name": "test-code",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "runner",
+                                                "path": "v3_distributed_extension_integration.py"
+                                            },
+                                            {
+                                                "key": "manifest",
+                                                "path": "v3_gpt2_extension_nccl.yaml"
+                                            }
+                                        ],
+                                        "name": "v3-gpt2-dist-test"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "plugin",
+                                                "path": "experiments/v3_gpt2_extension.py"
+                                            },
+                                            {
+                                                "key": "init",
+                                                "path": "experiments/__init__.py"
+                                            }
+                                        ],
+                                        "name": "v3-gpt2-gpu-test"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "__init__.py",
+                                                "path": "src/llm_runtime/__init__.py"
+                                            },
+                                            {
+                                                "key": "model_metadata.py",
+                                                "path": "src/llm_runtime/model_metadata.py"
+                                            },
+                                            {
+                                                "key": "optimization_registry.py",
+                                                "path": "src/llm_runtime/optimization_registry.py"
+                                            },
+                                            {
+                                                "key": "runtime_discovery.py",
+                                                "path": "src/llm_runtime/runtime_discovery.py"
+                                            },
+                                            {
+                                                "key": "v3_adapter_registry.py",
+                                                "path": "src/llm_runtime/v3_adapter_registry.py"
+                                            },
+                                            {
+                                                "key": "v3_attention_install.py",
+                                                "path": "src/llm_runtime/v3_attention_install.py"
+                                            },
+                                            {
+                                                "key": "v3_attention_plan.py",
+                                                "path": "src/llm_runtime/v3_attention_plan.py"
+                                            },
+                                            {
+                                                "key": "v3_extension_contracts.py",
+                                                "path": "src/llm_runtime/v3_extension_contracts.py"
+                                            },
+                                            {
+                                                "key": "v3_manifest.py",
+                                                "path": "src/llm_runtime/v3_manifest.py"
+                                            },
+                                            {
+                                                "key": "v3_model_inspector.py",
+                                                "path": "src/llm_runtime/v3_model_inspector.py"
+                                            },
+                                            {
+                                                "key": "v3_plan_loader.py",
+                                                "path": "src/llm_runtime/v3_plan_loader.py"
+                                            },
+                                            {
+                                                "key": "v3_plugin_registry.py",
+                                                "path": "src/llm_runtime/v3_plugin_registry.py"
+                                            },
+                                            {
+                                                "key": "v3_qwen3_adapter.py",
+                                                "path": "src/llm_runtime/v3_qwen3_adapter.py"
+                                            },
+                                            {
+                                                "key": "v3_runtime_plan.py",
+                                                "path": "src/llm_runtime/v3_runtime_plan.py"
+                                            },
+                                            {
+                                                "key": "v3_stage_bridge.py",
+                                                "path": "src/llm_runtime/v3_stage_bridge.py"
+                                            }
+                                        ],
+                                        "name": "v3-gpt2-framework-src"
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "kube-api-access-rxjw2",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "serviceAccountToken": {
+                                        "expirationSeconds": 3607,
+                                        "path": "token"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "ca.crt",
+                                                "path": "ca.crt"
+                                            }
+                                        ],
+                                        "name": "kube-root-ca.crt"
+                                    }
+                                },
+                                {
+                                    "downwardAPI": {
+                                        "items": [
+                                            {
+                                                "fieldRef": {
+                                                    "apiVersion": "v1",
+                                                    "fieldPath": "metadata.namespace"
+                                                },
+                                                "path": "namespace"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "allocatedResources": {
+                    "nvidia.com/gpu": "1"
+                },
+                "conditions": [
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:20:03Z",
+                        "observedGeneration": 1,
+                        "status": "False",
+                        "type": "PodReadyToStartContainers"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:18:07Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "True",
+                        "type": "Initialized"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:20:02Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "False",
+                        "type": "Ready"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:20:02Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "False",
+                        "type": "ContainersReady"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:18:07Z",
+                        "observedGeneration": 1,
+                        "status": "True",
+                        "type": "PodScheduled"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "allocatedResources": {
+                            "nvidia.com/gpu": "1"
+                        },
+                        "allocatedResourcesStatus": [
+                            {
+                                "name": "nvidia.com/gpu",
+                                "resources": [
+                                    {
+                                        "health": "Healthy",
+                                        "resourceID": "GPU-14898c5e-5ab2-e5b0-da4c-73f5ba189c96"
+                                    }
+                                ]
+                            }
+                        ],
+                        "containerID": "containerd://0369ddabf01dd24f9d56abe4da1fefe9792cf03b0a1b84b94accda468cd83234",
+                        "image": "sha256:a60cb7810b225e54cfe20c7233d67d63e8d1b6f90d02cfc8c5ba77497e1abf4d",
+                        "imageID": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747",
+                        "lastState": {},
+                        "name": "runtime",
+                        "ready": false,
+                        "resources": {
+                            "limits": {
+                                "nvidia.com/gpu": "1"
+                            },
+                            "requests": {
+                                "nvidia.com/gpu": "1"
+                            }
+                        },
+                        "restartCount": 0,
+                        "started": false,
+                        "state": {
+                            "terminated": {
+                                "containerID": "containerd://0369ddabf01dd24f9d56abe4da1fefe9792cf03b0a1b84b94accda468cd83234",
+                                "exitCode": 0,
+                                "finishedAt": "2026-11-05T04:19:52Z",
+                                "reason": "Completed",
+                                "startedAt": "2026-11-05T04:19:40Z"
+                            }
+                        },
+                        "user": {
+                            "linux": {
+                                "gid": 0,
+                                "supplementalGroups": [
+                                    0
+                                ],
+                                "uid": 0
+                            }
+                        },
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/workspace",
+                                "name": "test-code",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-rxjw2",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            }
+                        ]
+                    }
+                ],
+                "hostIP": "192.168.50.31",
+                "hostIPs": [
+                    {
+                        "ip": "192.168.50.31"
+                    }
+                ],
+                "observedGeneration": 1,
+                "phase": "Succeeded",
+                "podIP": "192.168.60.57",
+                "podIPs": [
+                    {
+                        "ip": "192.168.60.57"
+                    }
+                ],
+                "qosClass": "BestEffort",
+                "resources": {},
+                "startTime": "2026-11-05T04:18:07Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "annotations": {
+                    "batch.kubernetes.io/job-completion-index": "1"
+                },
+                "creationTimestamp": "2026-11-05T04:18:07Z",
+                "generateName": "v3-gpt2-dist-1-",
+                "generation": 1,
+                "labels": {
+                    "app": "v3-gpt2-dist",
+                    "batch.kubernetes.io/controller-uid": "aaf5ddaa-8fc1-439c-80d7-78db87a2bc80",
+                    "batch.kubernetes.io/job-completion-index": "1",
+                    "batch.kubernetes.io/job-name": "v3-gpt2-dist",
+                    "controller-uid": "aaf5ddaa-8fc1-439c-80d7-78db87a2bc80",
+                    "job-name": "v3-gpt2-dist",
+                    "topology.kubernetes.io/region": "us-east-2",
+                    "topology.kubernetes.io/zone": "us-east-2b"
+                },
+                "name": "v3-gpt2-dist-1-8g4rg",
+                "namespace": "llm",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "batch/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Job",
+                        "name": "v3-gpt2-dist",
+                        "uid": "aaf5ddaa-8fc1-439c-80d7-78db87a2bc80"
+                    }
+                ],
+                "resourceVersion": "1598999",
+                "uid": "69720740-f0c7-4d9b-a67e-d42c94377d1d"
+            },
+            "spec": {
+                "affinity": {
+                    "podAntiAffinity": {
+                        "requiredDuringSchedulingIgnoredDuringExecution": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "v3-gpt2-dist"
+                                    }
+                                },
+                                "topologyKey": "kubernetes.io/hostname"
+                            }
+                        ]
+                    }
+                },
+                "containers": [
+                    {
+                        "command": [
+                            "python",
+                            "/workspace/v3_distributed_extension_integration.py"
+                        ],
+                        "env": [
+                            {
+                                "name": "PYTHONPATH",
+                                "value": "/workspace/src:/workspace:/app:/app/v3"
+                            },
+                            {
+                                "name": "MASTER_ADDR",
+                                "value": "v3-gpt2-dist-0.v3-gpt2-dist-headless.llm.svc.cluster.local"
+                            },
+                            {
+                                "name": "MASTER_PORT",
+                                "value": "29618"
+                            },
+                            {
+                                "name": "WORLD_SIZE",
+                                "value": "2"
+                            },
+                            {
+                                "name": "NCCL_SOCKET_IFNAME",
+                                "value": "eth0"
+                            },
+                            {
+                                "name": "NCCL_IB_DISABLE",
+                                "value": "1"
+                            },
+                            {
+                                "name": "JOB_COMPLETION_INDEX",
+                                "valueFrom": {
+                                    "fieldRef": {
+                                        "apiVersion": "v1",
+                                        "fieldPath": "metadata.labels['batch.kubernetes.io/job-completion-index']"
+                                    }
+                                }
+                            }
+                        ],
+                        "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747",
+                        "imagePullPolicy": "IfNotPresent",
+                        "name": "runtime",
+                        "resources": {
+                            "limits": {
+                                "nvidia.com/gpu": "1"
+                            },
+                            "requests": {
+                                "nvidia.com/gpu": "1"
+                            }
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File",
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/workspace",
+                                "name": "test-code",
+                                "readOnly": true
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-6k762",
+                                "readOnly": true
+                            }
+                        ]
+                    }
+                ],
+                "dnsPolicy": "ClusterFirst",
+                "enableServiceLinks": true,
+                "hostname": "v3-gpt2-dist-1",
+                "nodeName": "ip-192-168-61-108.us-east-2.compute.internal",
+                "nodeSelector": {
+                    "pool": "gpu"
+                },
+                "preemptionPolicy": "PreemptLowerPriority",
+                "priority": 0,
+                "restartPolicy": "Never",
+                "schedulerName": "default-scheduler",
+                "securityContext": {},
+                "serviceAccount": "default",
+                "serviceAccountName": "default",
+                "subdomain": "v3-gpt2-dist-headless",
+                "terminationGracePeriodSeconds": 30,
+                "tolerations": [
+                    {
+                        "operator": "Exists"
+                    },
+                    {
+                        "effect": "NoSchedule",
+                        "key": "nvidia.com/gpu",
+                        "operator": "Exists"
+                    }
+                ],
+                "volumes": [
+                    {
+                        "name": "test-code",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "runner",
+                                                "path": "v3_distributed_extension_integration.py"
+                                            },
+                                            {
+                                                "key": "manifest",
+                                                "path": "v3_gpt2_extension_nccl.yaml"
+                                            }
+                                        ],
+                                        "name": "v3-gpt2-dist-test"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "plugin",
+                                                "path": "experiments/v3_gpt2_extension.py"
+                                            },
+                                            {
+                                                "key": "init",
+                                                "path": "experiments/__init__.py"
+                                            }
+                                        ],
+                                        "name": "v3-gpt2-gpu-test"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "__init__.py",
+                                                "path": "src/llm_runtime/__init__.py"
+                                            },
+                                            {
+                                                "key": "model_metadata.py",
+                                                "path": "src/llm_runtime/model_metadata.py"
+                                            },
+                                            {
+                                                "key": "optimization_registry.py",
+                                                "path": "src/llm_runtime/optimization_registry.py"
+                                            },
+                                            {
+                                                "key": "runtime_discovery.py",
+                                                "path": "src/llm_runtime/runtime_discovery.py"
+                                            },
+                                            {
+                                                "key": "v3_adapter_registry.py",
+                                                "path": "src/llm_runtime/v3_adapter_registry.py"
+                                            },
+                                            {
+                                                "key": "v3_attention_install.py",
+                                                "path": "src/llm_runtime/v3_attention_install.py"
+                                            },
+                                            {
+                                                "key": "v3_attention_plan.py",
+                                                "path": "src/llm_runtime/v3_attention_plan.py"
+                                            },
+                                            {
+                                                "key": "v3_extension_contracts.py",
+                                                "path": "src/llm_runtime/v3_extension_contracts.py"
+                                            },
+                                            {
+                                                "key": "v3_manifest.py",
+                                                "path": "src/llm_runtime/v3_manifest.py"
+                                            },
+                                            {
+                                                "key": "v3_model_inspector.py",
+                                                "path": "src/llm_runtime/v3_model_inspector.py"
+                                            },
+                                            {
+                                                "key": "v3_plan_loader.py",
+                                                "path": "src/llm_runtime/v3_plan_loader.py"
+                                            },
+                                            {
+                                                "key": "v3_plugin_registry.py",
+                                                "path": "src/llm_runtime/v3_plugin_registry.py"
+                                            },
+                                            {
+                                                "key": "v3_qwen3_adapter.py",
+                                                "path": "src/llm_runtime/v3_qwen3_adapter.py"
+                                            },
+                                            {
+                                                "key": "v3_runtime_plan.py",
+                                                "path": "src/llm_runtime/v3_runtime_plan.py"
+                                            },
+                                            {
+                                                "key": "v3_stage_bridge.py",
+                                                "path": "src/llm_runtime/v3_stage_bridge.py"
+                                            }
+                                        ],
+                                        "name": "v3-gpt2-framework-src"
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "name": "kube-api-access-6k762",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "serviceAccountToken": {
+                                        "expirationSeconds": 3607,
+                                        "path": "token"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "ca.crt",
+                                                "path": "ca.crt"
+                                            }
+                                        ],
+                                        "name": "kube-root-ca.crt"
+                                    }
+                                },
+                                {
+                                    "downwardAPI": {
+                                        "items": [
+                                            {
+                                                "fieldRef": {
+                                                    "apiVersion": "v1",
+                                                    "fieldPath": "metadata.namespace"
+                                                },
+                                                "path": "namespace"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "allocatedResources": {
+                    "nvidia.com/gpu": "1"
+                },
+                "conditions": [
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:20:03Z",
+                        "observedGeneration": 1,
+                        "status": "False",
+                        "type": "PodReadyToStartContainers"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:18:07Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "True",
+                        "type": "Initialized"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:20:02Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "False",
+                        "type": "Ready"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:20:02Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "False",
+                        "type": "ContainersReady"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-05T04:18:07Z",
+                        "observedGeneration": 1,
+                        "status": "True",
+                        "type": "PodScheduled"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "allocatedResources": {
+                            "nvidia.com/gpu": "1"
+                        },
+                        "allocatedResourcesStatus": [
+                            {
+                                "name": "nvidia.com/gpu",
+                                "resources": [
+                                    {
+                                        "health": "Healthy",
+                                        "resourceID": "GPU-0380fc3f-ac67-f79d-317f-77075cda4ba7"
+                                    }
+                                ]
+                            }
+                        ],
+                        "containerID": "containerd://2b9ae87f2b6e24b431de0dc08144c5ce962c0a799c8238382b82b870605f5622",
+                        "image": "sha256:a60cb7810b225e54cfe20c7233d67d63e8d1b6f90d02cfc8c5ba77497e1abf4d",
+                        "imageID": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747",
+                        "lastState": {},
+                        "name": "runtime",
+                        "ready": false,
+                        "resources": {
+                            "limits": {
+                                "nvidia.com/gpu": "1"
+                            },
+                            "requests": {
+                                "nvidia.com/gpu": "1"
+                            }
+                        },
+                        "restartCount": 0,
+                        "started": false,
+                        "state": {
+                            "terminated": {
+                                "containerID": "containerd://2b9ae87f2b6e24b431de0dc08144c5ce962c0a799c8238382b82b870605f5622",
+                                "exitCode": 0,
+                                "finishedAt": "2026-11-05T04:19:52Z",
+                                "reason": "Completed",
+                                "startedAt": "2026-11-05T04:19:45Z"
+                            }
+                        },
+                        "user": {
+                            "linux": {
+                                "gid": 0,
+                                "supplementalGroups": [
+                                    0
+                                ],
+                                "uid": 0
+                            }
+                        },
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/workspace",
+                                "name": "test-code",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-6k762",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            }
+                        ]
+                    }
+                ],
+                "hostIP": "192.168.61.108",
+                "hostIPs": [
+                    {
+                        "ip": "192.168.61.108"
+                    }
+                ],
+                "observedGeneration": 1,
+                "phase": "Succeeded",
+                "podIP": "192.168.62.203",
+                "podIPs": [
+                    {
+                        "ip": "192.168.62.203"
+                    }
+                ],
+                "qosClass": "BestEffort",
+                "resources": {},
+                "startTime": "2026-11-05T04:18:07Z"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}

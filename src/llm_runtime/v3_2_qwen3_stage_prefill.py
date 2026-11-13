@@ -12,6 +12,7 @@ not an optimized paged-attention kernel.
 """
 
 from dataclasses import dataclass
+import os
 
 import torch
 
@@ -290,9 +291,19 @@ def stage_block_prefill(
                 index:index + 1, :, :take, :
             ]
 
-            scores = (
-                query @ repeated_k.transpose(-2, -1)
-            ) * attn.scaling
+            use_fp32_attention = (
+                os.getenv("D_PREFILL_FP32_DIAG", "0") == "1"
+            )
+
+            if use_fp32_attention:
+                scores = (
+                    query.float()
+                    @ repeated_k.float().transpose(-2, -1)
+                ) * attn.scaling
+            else:
+                scores = (
+                    query @ repeated_k.transpose(-2, -1)
+                ) * attn.scaling
 
             # Query i may see all committed history plus
             # the first i+1 tokens of its current chunk.
@@ -318,15 +329,24 @@ def stage_block_prefill(
                 torch.finfo(scores.dtype).min,
             )
 
-            probabilities = torch.softmax(
-                scores,
-                dim=-1,
-                dtype=torch.float32,
-            ).to(query.dtype)
+            if use_fp32_attention:
+                probabilities = torch.softmax(
+                    scores, dim=-1,
+                    dtype=torch.float32,
+                )
+                attended = (
+                    probabilities @ repeated_v.float()
+                ).to(query.dtype)
+            else:
+                probabilities = torch.softmax(
+                    scores,
+                    dim=-1,
+                    dtype=torch.float32,
+                ).to(query.dtype)
 
-            attended = (
-                probabilities @ repeated_v
-            )
+                attended = (
+                    probabilities @ repeated_v
+                )
 
             context[index, :take] = (
                 attended.transpose(1, 2)

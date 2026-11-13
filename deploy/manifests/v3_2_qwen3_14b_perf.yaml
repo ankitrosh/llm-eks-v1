@@ -1,0 +1,507 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: v32-qwen3-14b-perf-headless
+  namespace: llm
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app: v32-qwen3-14b-perf
+  ports:
+  - name: rendezvous
+    port: 29658
+    targetPort: 29658
+  - name: control
+    port: 29659
+    targetPort: 29659
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v32-qwen3-14b-perf-rank0
+  namespace: llm
+spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app: v32-qwen3-14b-perf
+        rank: '0'
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 20
+      subdomain: v32-qwen3-14b-perf-headless
+      nodeSelector:
+        pool: gpu
+      tolerations:
+      - operator: Exists
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: v32-qwen3-14b-perf
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: runtime
+        image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+        command:
+        - python3
+        - -u
+        - /opt/v32/scripts/v3_2_gpu_qwen3_smoke.py
+        env:
+        - name: MASTER_PORT
+          value: '29658'
+        - name: V3_CTRL_PORT
+          value: '29659'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        - name: HF_HUB_OFFLINE
+          value: '1'
+        - name: TOKENIZERS_PARALLELISM
+          value: 'false'
+        - name: OMP_NUM_THREADS
+          value: '1'
+        - name: RANK
+          value: '0'
+        - name: WORLD_SIZE
+          value: '2'
+        - name: MASTER_ADDR
+          value: v32-qwen3-14b-perf-rank0.v32-qwen3-14b-perf-headless.llm.svc.cluster.local
+        - name: PYTHONPATH
+          value: /opt/v32
+        - name: MODEL_DIR
+          value: /models/qwen3-14b
+        - name: NCCL_IB_DISABLE
+          value: '1'
+        - name: NCCL_SOCKET_IFNAME
+          value: eth0
+        - name: NCCL_DEBUG
+          value: WARN
+        - name: V32_REQUESTS
+          value: '4'
+        - name: V32_PROMPT_TOKENS
+          value: '128'
+        - name: V32_NEW_TOKENS
+          value: '64'
+        resources:
+          requests:
+            nvidia.com/gpu: '1'
+            memory: 6Gi
+          limits:
+            nvidia.com/gpu: '1'
+            memory: 12Gi
+        volumeMounts:
+        - name: v3-gpt2-shm
+          mountPath: /dev/shm
+        - name: model-files
+          mountPath: /models
+          readOnly: true
+        - name: v32-source
+          mountPath: /opt/v32
+          readOnly: true
+      volumes:
+      - name: v3-gpt2-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: model-files
+        persistentVolumeClaim:
+          claimName: model-files-qwen3-0
+          readOnly: true
+      - name: v32-source
+        configMap:
+          name: v32-a10g-source
+          items:
+          - key: module_000
+            path: llm_runtime/__init__.py
+          - key: module_001
+            path: llm_runtime/model_metadata.py
+          - key: module_002
+            path: llm_runtime/optimization_registry.py
+          - key: module_003
+            path: llm_runtime/providers/__init__.py
+          - key: module_004
+            path: llm_runtime/providers/v3_1_configured_stage_factory.py
+          - key: module_005
+            path: llm_runtime/providers/v3_1_gptq_int8_torch.py
+          - key: module_006
+            path: llm_runtime/providers/v3_1_gptq_marlin_provider.py
+          - key: module_007
+            path: llm_runtime/providers/v3_1_quantized_stage_loader.py
+          - key: module_008
+            path: llm_runtime/providers/v3_1_qwen3_layout.py
+          - key: module_009
+            path: llm_runtime/providers/v3_1_qwen3_nrank_factory.py
+          - key: module_010
+            path: llm_runtime/providers/v3_qwen3_partition.py
+          - key: module_011
+            path: llm_runtime/providers/v3_qwen3_process_factory.py
+          - key: module_012
+            path: llm_runtime/providers/v3_qwen3_stage_only_factory.py
+          - key: module_013
+            path: llm_runtime/runtime_discovery.py
+          - key: module_014
+            path: llm_runtime/v3_1_checkpoint_profile.py
+          - key: module_015
+            path: llm_runtime/v3_1_communication_api.py
+          - key: module_016
+            path: llm_runtime/v3_1_custom_quantization.py
+          - key: module_017
+            path: llm_runtime/v3_1_gptq_int8_inspection.py
+          - key: module_018
+            path: llm_runtime/v3_1_launch_spec.py
+          - key: module_019
+            path: llm_runtime/v3_1_nrank_transport.py
+          - key: module_020
+            path: llm_runtime/v3_1_packet_bridge.py
+          - key: module_021
+            path: llm_runtime/v3_1_packet_factory.py
+          - key: module_022
+            path: llm_runtime/v3_1_packet_runtime.py
+          - key: module_023
+            path: llm_runtime/v3_1_partition_planner.py
+          - key: module_024
+            path: llm_runtime/v3_1_quantization_api.py
+          - key: module_025
+            path: llm_runtime/v3_1_runtime_config.py
+          - key: module_026
+            path: llm_runtime/v3_1_startup_protocol.py
+          - key: module_027
+            path: llm_runtime/v3_1_torch_codecs.py
+          - key: module_028
+            path: llm_runtime/v3_1_transport_backends.py
+          - key: module_029
+            path: llm_runtime/v3_2_async_gloo.py
+          - key: module_030
+            path: llm_runtime/v3_2_async_gloo_qwen3.py
+          - key: module_031
+            path: llm_runtime/v3_2_batch_planner.py
+          - key: module_032
+            path: llm_runtime/v3_2_block_attention.py
+          - key: module_033
+            path: llm_runtime/v3_2_block_engine.py
+          - key: module_034
+            path: llm_runtime/v3_2_concurrent_nrank_runtime.py
+          - key: module_035
+            path: llm_runtime/v3_2_concurrent_planner.py
+          - key: module_036
+            path: llm_runtime/v3_2_continuous_engine.py
+          - key: module_037
+            path: llm_runtime/v3_2_gloo_qwen3_smoke.py
+          - key: module_038
+            path: llm_runtime/v3_2_gloo_wire.py
+          - key: module_039
+            path: llm_runtime/v3_2_kv_blocks.py
+          - key: module_040
+            path: llm_runtime/v3_2_kv_storage.py
+          - key: module_041
+            path: llm_runtime/v3_2_microbatch_transport.py
+          - key: module_042
+            path: llm_runtime/v3_2_mixed_nrank_runtime.py
+          - key: module_043
+            path: llm_runtime/v3_2_nrank_cpu_runtime.py
+          - key: module_044
+            path: llm_runtime/v3_2_pipeline_policy.py
+          - key: module_045
+            path: llm_runtime/v3_2_policy_api.py
+          - key: module_046
+            path: llm_runtime/v3_2_policy_transport.py
+          - key: module_047
+            path: llm_runtime/v3_2_qwen3_block_decode.py
+          - key: module_048
+            path: llm_runtime/v3_2_qwen3_cache_batch.py
+          - key: module_049
+            path: llm_runtime/v3_2_qwen3_padding.py
+          - key: module_050
+            path: llm_runtime/v3_2_qwen3_stage_batch.py
+          - key: module_051
+            path: llm_runtime/v3_2_qwen3_stage_prefill.py
+          - key: module_052
+            path: llm_runtime/v3_2_scheduler_api.py
+          - key: module_053
+            path: llm_runtime/v3_activation_protocol.py
+          - key: module_054
+            path: llm_runtime/v3_adapter_registry.py
+          - key: module_055
+            path: llm_runtime/v3_attention_install.py
+          - key: module_056
+            path: llm_runtime/v3_attention_plan.py
+          - key: module_057
+            path: llm_runtime/v3_execution_factory.py
+          - key: module_058
+            path: llm_runtime/v3_extension_contracts.py
+          - key: module_059
+            path: llm_runtime/v3_manifest.py
+          - key: module_060
+            path: llm_runtime/v3_model_inspector.py
+          - key: module_061
+            path: llm_runtime/v3_ordered_rank_transport.py
+          - key: module_062
+            path: llm_runtime/v3_partition_utils.py
+          - key: module_063
+            path: llm_runtime/v3_pipeline_scheduler.py
+          - key: module_064
+            path: llm_runtime/v3_plan_loader.py
+          - key: module_065
+            path: llm_runtime/v3_plugin_registry.py
+          - key: module_066
+            path: llm_runtime/v3_process_transport.py
+          - key: module_067
+            path: llm_runtime/v3_qwen3_adapter.py
+          - key: module_068
+            path: llm_runtime/v3_runtime_plan.py
+          - key: module_069
+            path: llm_runtime/v3_stage_bridge.py
+          - key: runner
+            path: scripts/v3_2_gpu_qwen3_smoke.py
+      hostname: v32-qwen3-14b-perf-rank0
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v32-qwen3-14b-perf-rank1
+  namespace: llm
+spec:
+  completions: 1
+  parallelism: 1
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  template:
+    metadata:
+      labels:
+        app: v32-qwen3-14b-perf
+        rank: '1'
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 20
+      subdomain: v32-qwen3-14b-perf-headless
+      nodeSelector:
+        pool: gpu
+      tolerations:
+      - operator: Exists
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: v32-qwen3-14b-perf
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: runtime
+        image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+        command:
+        - python3
+        - -u
+        - /opt/v32/scripts/v3_2_gpu_qwen3_smoke.py
+        env:
+        - name: MASTER_PORT
+          value: '29658'
+        - name: V3_CTRL_PORT
+          value: '29659'
+        - name: PYTHONUNBUFFERED
+          value: '1'
+        - name: HF_HUB_OFFLINE
+          value: '1'
+        - name: TOKENIZERS_PARALLELISM
+          value: 'false'
+        - name: OMP_NUM_THREADS
+          value: '1'
+        - name: RANK
+          value: '1'
+        - name: WORLD_SIZE
+          value: '2'
+        - name: MASTER_ADDR
+          value: v32-qwen3-14b-perf-rank0.v32-qwen3-14b-perf-headless.llm.svc.cluster.local
+        - name: PYTHONPATH
+          value: /opt/v32
+        - name: MODEL_DIR
+          value: /models/qwen3-14b
+        - name: NCCL_IB_DISABLE
+          value: '1'
+        - name: NCCL_SOCKET_IFNAME
+          value: eth0
+        - name: NCCL_DEBUG
+          value: WARN
+        - name: V32_REQUESTS
+          value: '4'
+        - name: V32_PROMPT_TOKENS
+          value: '128'
+        - name: V32_NEW_TOKENS
+          value: '64'
+        resources:
+          requests:
+            nvidia.com/gpu: '1'
+            memory: 6Gi
+          limits:
+            nvidia.com/gpu: '1'
+            memory: 12Gi
+        volumeMounts:
+        - name: v3-gpt2-shm
+          mountPath: /dev/shm
+        - name: model-files
+          mountPath: /models
+          readOnly: true
+        - name: v32-source
+          mountPath: /opt/v32
+          readOnly: true
+      volumes:
+      - name: v3-gpt2-shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
+      - name: model-files
+        persistentVolumeClaim:
+          claimName: model-files-qwen3-1
+          readOnly: true
+      - name: v32-source
+        configMap:
+          name: v32-a10g-source
+          items:
+          - key: module_000
+            path: llm_runtime/__init__.py
+          - key: module_001
+            path: llm_runtime/model_metadata.py
+          - key: module_002
+            path: llm_runtime/optimization_registry.py
+          - key: module_003
+            path: llm_runtime/providers/__init__.py
+          - key: module_004
+            path: llm_runtime/providers/v3_1_configured_stage_factory.py
+          - key: module_005
+            path: llm_runtime/providers/v3_1_gptq_int8_torch.py
+          - key: module_006
+            path: llm_runtime/providers/v3_1_gptq_marlin_provider.py
+          - key: module_007
+            path: llm_runtime/providers/v3_1_quantized_stage_loader.py
+          - key: module_008
+            path: llm_runtime/providers/v3_1_qwen3_layout.py
+          - key: module_009
+            path: llm_runtime/providers/v3_1_qwen3_nrank_factory.py
+          - key: module_010
+            path: llm_runtime/providers/v3_qwen3_partition.py
+          - key: module_011
+            path: llm_runtime/providers/v3_qwen3_process_factory.py
+          - key: module_012
+            path: llm_runtime/providers/v3_qwen3_stage_only_factory.py
+          - key: module_013
+            path: llm_runtime/runtime_discovery.py
+          - key: module_014
+            path: llm_runtime/v3_1_checkpoint_profile.py
+          - key: module_015
+            path: llm_runtime/v3_1_communication_api.py
+          - key: module_016
+            path: llm_runtime/v3_1_custom_quantization.py
+          - key: module_017
+            path: llm_runtime/v3_1_gptq_int8_inspection.py
+          - key: module_018
+            path: llm_runtime/v3_1_launch_spec.py
+          - key: module_019
+            path: llm_runtime/v3_1_nrank_transport.py
+          - key: module_020
+            path: llm_runtime/v3_1_packet_bridge.py
+          - key: module_021
+            path: llm_runtime/v3_1_packet_factory.py
+          - key: module_022
+            path: llm_runtime/v3_1_packet_runtime.py
+          - key: module_023
+            path: llm_runtime/v3_1_partition_planner.py
+          - key: module_024
+            path: llm_runtime/v3_1_quantization_api.py
+          - key: module_025
+            path: llm_runtime/v3_1_runtime_config.py
+          - key: module_026
+            path: llm_runtime/v3_1_startup_protocol.py
+          - key: module_027
+            path: llm_runtime/v3_1_torch_codecs.py
+          - key: module_028
+            path: llm_runtime/v3_1_transport_backends.py
+          - key: module_029
+            path: llm_runtime/v3_2_async_gloo.py
+          - key: module_030
+            path: llm_runtime/v3_2_async_gloo_qwen3.py
+          - key: module_031
+            path: llm_runtime/v3_2_batch_planner.py
+          - key: module_032
+            path: llm_runtime/v3_2_block_attention.py
+          - key: module_033
+            path: llm_runtime/v3_2_block_engine.py
+          - key: module_034
+            path: llm_runtime/v3_2_concurrent_nrank_runtime.py
+          - key: module_035
+            path: llm_runtime/v3_2_concurrent_planner.py
+          - key: module_036
+            path: llm_runtime/v3_2_continuous_engine.py
+          - key: module_037
+            path: llm_runtime/v3_2_gloo_qwen3_smoke.py
+          - key: module_038
+            path: llm_runtime/v3_2_gloo_wire.py
+          - key: module_039
+            path: llm_runtime/v3_2_kv_blocks.py
+          - key: module_040
+            path: llm_runtime/v3_2_kv_storage.py
+          - key: module_041
+            path: llm_runtime/v3_2_microbatch_transport.py
+          - key: module_042
+            path: llm_runtime/v3_2_mixed_nrank_runtime.py
+          - key: module_043
+            path: llm_runtime/v3_2_nrank_cpu_runtime.py
+          - key: module_044
+            path: llm_runtime/v3_2_pipeline_policy.py
+          - key: module_045
+            path: llm_runtime/v3_2_policy_api.py
+          - key: module_046
+            path: llm_runtime/v3_2_policy_transport.py
+          - key: module_047
+            path: llm_runtime/v3_2_qwen3_block_decode.py
+          - key: module_048
+            path: llm_runtime/v3_2_qwen3_cache_batch.py
+          - key: module_049
+            path: llm_runtime/v3_2_qwen3_padding.py
+          - key: module_050
+            path: llm_runtime/v3_2_qwen3_stage_batch.py
+          - key: module_051
+            path: llm_runtime/v3_2_qwen3_stage_prefill.py
+          - key: module_052
+            path: llm_runtime/v3_2_scheduler_api.py
+          - key: module_053
+            path: llm_runtime/v3_activation_protocol.py
+          - key: module_054
+            path: llm_runtime/v3_adapter_registry.py
+          - key: module_055
+            path: llm_runtime/v3_attention_install.py
+          - key: module_056
+            path: llm_runtime/v3_attention_plan.py
+          - key: module_057
+            path: llm_runtime/v3_execution_factory.py
+          - key: module_058
+            path: llm_runtime/v3_extension_contracts.py
+          - key: module_059
+            path: llm_runtime/v3_manifest.py
+          - key: module_060
+            path: llm_runtime/v3_model_inspector.py
+          - key: module_061
+            path: llm_runtime/v3_ordered_rank_transport.py
+          - key: module_062
+            path: llm_runtime/v3_partition_utils.py
+          - key: module_063
+            path: llm_runtime/v3_pipeline_scheduler.py
+          - key: module_064
+            path: llm_runtime/v3_plan_loader.py
+          - key: module_065
+            path: llm_runtime/v3_plugin_registry.py
+          - key: module_066
+            path: llm_runtime/v3_process_transport.py
+          - key: module_067
+            path: llm_runtime/v3_qwen3_adapter.py
+          - key: module_068
+            path: llm_runtime/v3_runtime_plan.py
+          - key: module_069
+            path: llm_runtime/v3_stage_bridge.py
+          - key: runner
+            path: scripts/v3_2_gpu_qwen3_smoke.py
+      hostname: v32-qwen3-14b-perf-rank1

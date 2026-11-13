@@ -1,0 +1,83 @@
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "initContainers": [
+          {
+            "name": "model-download",
+            "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:bcd962ac9b7deaf2af31591be0d5d336ba5eff7d7d613f2c072391af48290dce",
+            "command": [
+              "/bin/bash",
+              "-lc"
+            ],
+            "args": [
+              "set -euo pipefail\n\nexport RANK=\"${HOSTNAME##*-}\"\n\necho \"Preparing rank $RANK\"\necho \"Model: $MODEL_REPO\"\necho \"Revision: $MODEL_REVISION\"\n\nexec python -u /app/qwen3_prepare_step.py   --rank \"$RANK\"   --split \"$SPLIT\"   --repo \"$MODEL_REPO\"   --revision \"$MODEL_REVISION\"   --model-dir \"$MODEL_DIR\"   --tokenizer-repo \"$TOKENIZER_REPO\"   --tokenizer-revision \"$TOKENIZER_REVISION\"\n"
+            ],
+            "env": [
+              {
+                "name": "MODEL_REPO",
+                "value": "JunHowie/Qwen3-14B-GPTQ-Int8"
+              },
+              {
+                "name": "MODEL_REVISION",
+                "value": "9b876cd2f6f2c870afd18bb5b458fb38ab3e3e00"
+              },
+              {
+                "name": "MODEL_DIR",
+                "value": "/models/qwen3-14b-gptq"
+              },
+              {
+                "name": "SPLIT",
+                "value": "20"
+              },
+              {
+                "name": "TOKENIZER_REPO",
+                "value": "Qwen/Qwen3-14B"
+              },
+              {
+                "name": "TOKENIZER_REVISION",
+                "value": "40c069824f4251a91eefaf281ebe4c544efd3e18"
+              },
+              {
+                "name": "HF_HOME",
+                "value": "/models/.hf-cache"
+              },
+              {
+                "name": "HF_HUB_DOWNLOAD_TIMEOUT",
+                "value": "120"
+              },
+              {
+                "name": "HF_HUB_ETAG_TIMEOUT",
+                "value": "30"
+              }
+            ]
+          }
+        ],
+        "containers": [
+          {
+            "name": "runtime",
+            "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:bcd962ac9b7deaf2af31591be0d5d336ba5eff7d7d613f2c072391af48290dce",
+            "env": [
+              {
+                "name": "MODEL_DIR",
+                "value": "/models/qwen3-14b-gptq"
+              },
+              {
+                "name": "SPLIT",
+                "value": "20"
+              },
+              {
+                "name": "MODE",
+                "value": "serve"
+              },
+              {
+                "name": "LLM_ATTENTION_BACKEND",
+                "value": "sdpa"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

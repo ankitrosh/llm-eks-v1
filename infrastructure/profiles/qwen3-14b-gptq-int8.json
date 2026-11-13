@@ -1,0 +1,12 @@
+{
+  "name": "qwen3-14b-gptq-int8",
+  "model_repo": "JunHowie/Qwen3-14B-GPTQ-Int8",
+  "model_revision": "9b876cd2f6f2c870afd18bb5b458fb38ab3e3e00",
+  "tokenizer_repo": "Qwen/Qwen3-14B",
+  "tokenizer_revision": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+  "model_dir": "/models/qwen3-14b-gptq",
+  "split": 20,
+  "num_layers": 40,
+  "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:bcd962ac9b7deaf2af31591be0d5d336ba5eff7d7d613f2c072391af48290dce",
+  "attention_backend": "sdpa"
+}

@@ -1,0 +1,76 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: v31-l4-cuda-probe
+  namespace: llm
+  labels:
+    app: v31-l4-cuda-probe
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: v31-l4-cuda-probe
+    spec:
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 15
+      nodeSelector:
+        pool: gpu-l4
+        node.kubernetes.io/instance-type: g6f.large
+      containers:
+        - name: cuda-probe
+          image: 657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              PYTHON=$(command -v python3 || command -v python)
+              "$PYTHON" - <<'PY'
+              import torch
+
+              print("PyTorch:", torch.__version__, flush=True)
+              print("CUDA runtime:", torch.version.cuda, flush=True)
+              print("CUDA available:", torch.cuda.is_available(), flush=True)
+
+              assert torch.cuda.is_available(), "CUDA not available"
+              assert torch.cuda.device_count() >= 1
+
+              device = torch.device("cuda:0")
+              print("GPU:", torch.cuda.get_device_name(0), flush=True)
+
+              free, total = torch.cuda.mem_get_info(0)
+              print(
+                  f"GPU memory: {free / 2**30:.2f} GiB free / "
+                  f"{total / 2**30:.2f} GiB total",
+                  flush=True,
+              )
+
+              a = torch.arange(
+                  1024,
+                  dtype=torch.float32,
+                  device=device,
+              ).reshape(32, 32)
+
+              b = torch.eye(
+                  32,
+                  dtype=torch.float32,
+                  device=device,
+              )
+
+              result = a @ b
+              torch.cuda.synchronize()
+
+              torch.testing.assert_close(result, a)
+
+              print("PASS: L4 CUDA tensor computation", flush=True)
+              PY
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "1500m"
+              memory: 3Gi
+              nvidia.com/gpu: "1"

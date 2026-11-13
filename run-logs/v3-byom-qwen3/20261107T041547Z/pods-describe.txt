@@ -1,0 +1,194 @@
+Name:             v3-byom-qwen3-smoke-rank0-2dthl
+Namespace:        llm
+Priority:         0
+Service Account:  default
+Node:             ip-192-168-53-42.us-east-2.compute.internal/192.168.53.42
+Start Time:       Sat, 07 Nov 2026 04:18:30 +0000
+Labels:           app=v3-byom-qwen3-smoke
+                  batch.kubernetes.io/controller-uid=e05f4bca-3628-4298-b883-b54f9d3dfb7b
+                  batch.kubernetes.io/job-name=v3-byom-qwen3-smoke-rank0
+                  controller-uid=e05f4bca-3628-4298-b883-b54f9d3dfb7b
+                  job-name=v3-byom-qwen3-smoke-rank0
+                  rank=0
+                  topology.kubernetes.io/region=us-east-2
+                  topology.kubernetes.io/zone=us-east-2b
+Annotations:      <none>
+Status:           Failed
+IP:               192.168.44.206
+IPs:
+  IP:           192.168.44.206
+Controlled By:  Job/v3-byom-qwen3-smoke-rank0
+Containers:
+  runtime:
+    Container ID:  containerd://4d7fb941fcc16954717231e1a92f3914679af3d2224107aeab29b93d42d267fa
+    Image:         657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+    Image ID:      657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      python
+      -u
+      /workspace/scripts/v3_generic_nccl_runner.py
+    Args:
+      --config
+      /workspace/examples/v3_byom_qwen3.json
+    State:          Terminated
+      Reason:       Error
+      Exit Code:    1
+      Started:      Sat, 07 Nov 2026 04:19:57 +0000
+      Finished:     Sat, 07 Nov 2026 04:20:03 +0000
+    Ready:          False
+    Restart Count:  0
+    Limits:
+      memory:          12Gi
+      nvidia.com/gpu:  1
+    Requests:
+      memory:          6Gi
+      nvidia.com/gpu:  1
+    Environment:
+      PYTHONPATH:              /workspace/src:/workspace:/app:/app/v3
+      RANK:                    0
+      WORLD_SIZE:              2
+      MASTER_ADDR:             v3-byom-qwen3-smoke-rank0.v3-byom-qwen3-smoke-headless.llm.svc.cluster.local
+      MASTER_PORT:             29678
+      V3_CTRL_PORT:            29679
+      NCCL_SOCKET_IFNAME:      eth0
+      NCCL_IB_DISABLE:         1
+      PYTHONUNBUFFERED:        1
+      MODEL_DIR:               /models/qwen3-14b
+      HF_HUB_OFFLINE:          1
+      TOKENIZERS_PARALLELISM:  false
+      OMP_NUM_THREADS:         1
+    Mounts:
+      /dev/shm from v3-gpt2-shm (rw)
+      /models from model-files (ro)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-zzz94 (ro)
+      /workspace from test-code (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   False 
+  Initialized                 True 
+  Ready                       False 
+  ContainersReady             False 
+  PodScheduled                True 
+Volumes:
+  test-code:
+    Type:           Projected (a volume that contains injected data from multiple sources)
+    ConfigMapName:  v3-byom-qwen3-smoke-code
+    Optional:       false
+  v3-gpt2-shm:
+    Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+    Medium:     Memory
+    SizeLimit:  1Gi
+  model-files:
+    Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
+    ClaimName:  model-files-qwen3-0
+    ReadOnly:   true
+  kube-api-access-zzz94:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              pool=gpu
+Tolerations:                 op=Exists
+                             nvidia.com/gpu:NoSchedule op=Exists
+
+
+Name:             v3-byom-qwen3-smoke-rank1-ghh7h
+Namespace:        llm
+Priority:         0
+Service Account:  default
+Node:             ip-192-168-60-189.us-east-2.compute.internal/192.168.60.189
+Start Time:       Sat, 07 Nov 2026 04:18:30 +0000
+Labels:           app=v3-byom-qwen3-smoke
+                  batch.kubernetes.io/controller-uid=c3be1f38-3bb6-4363-80b0-8dc8c2c5d8d6
+                  batch.kubernetes.io/job-name=v3-byom-qwen3-smoke-rank1
+                  controller-uid=c3be1f38-3bb6-4363-80b0-8dc8c2c5d8d6
+                  job-name=v3-byom-qwen3-smoke-rank1
+                  rank=1
+                  topology.kubernetes.io/region=us-east-2
+                  topology.kubernetes.io/zone=us-east-2b
+Annotations:      <none>
+Status:           Failed
+IP:               192.168.52.206
+IPs:
+  IP:           192.168.52.206
+Controlled By:  Job/v3-byom-qwen3-smoke-rank1
+Containers:
+  runtime:
+    Container ID:  containerd://3bd8a75ccfec84d3c75318e724d806e8dba52b9adae47a7163e22eb855c11b4f
+    Image:         657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+    Image ID:      657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747
+    Port:          <none>
+    Host Port:     <none>
+    Command:
+      python
+      -u
+      /workspace/scripts/v3_generic_nccl_runner.py
+    Args:
+      --config
+      /workspace/examples/v3_byom_qwen3.json
+    State:          Terminated
+      Reason:       Error
+      Exit Code:    1
+      Started:      Sat, 07 Nov 2026 04:19:58 +0000
+      Finished:     Sat, 07 Nov 2026 04:20:03 +0000
+    Ready:          False
+    Restart Count:  0
+    Limits:
+      memory:          12Gi
+      nvidia.com/gpu:  1
+    Requests:
+      memory:          6Gi
+      nvidia.com/gpu:  1
+    Environment:
+      PYTHONPATH:              /workspace/src:/workspace:/app:/app/v3
+      RANK:                    1
+      WORLD_SIZE:              2
+      MASTER_ADDR:             v3-byom-qwen3-smoke-rank0.v3-byom-qwen3-smoke-headless.llm.svc.cluster.local
+      MASTER_PORT:             29678
+      V3_CTRL_PORT:            29679
+      NCCL_SOCKET_IFNAME:      eth0
+      NCCL_IB_DISABLE:         1
+      PYTHONUNBUFFERED:        1
+      MODEL_DIR:               /models/qwen3-14b
+      HF_HUB_OFFLINE:          1
+      TOKENIZERS_PARALLELISM:  false
+      OMP_NUM_THREADS:         1
+    Mounts:
+      /dev/shm from v3-gpt2-shm (rw)
+      /models from model-files (ro)
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-mdg8x (ro)
+      /workspace from test-code (ro)
+Conditions:
+  Type                        Status
+  PodReadyToStartContainers   False 
+  Initialized                 True 
+  Ready                       False 
+  ContainersReady             False 
+  PodScheduled                True 
+Volumes:
+  test-code:
+    Type:           Projected (a volume that contains injected data from multiple sources)
+    ConfigMapName:  v3-byom-qwen3-smoke-code
+    Optional:       false
+  v3-gpt2-shm:
+    Type:       EmptyDir (a temporary directory that shares a pod's lifetime)
+    Medium:     Memory
+    SizeLimit:  1Gi
+  model-files:
+    Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
+    ClaimName:  model-files-qwen3-1
+    ReadOnly:   true
+  kube-api-access-mdg8x:
+    Type:                    Projected (a volume that contains injected data from multiple sources)
+    TokenExpirationSeconds:  3607
+    ConfigMapName:           kube-root-ca.crt
+    Optional:                false
+    DownwardAPI:             true
+QoS Class:                   Burstable
+Node-Selectors:              pool=gpu
+Tolerations:                 op=Exists
+                             nvidia.com/gpu:NoSchedule op=Exists

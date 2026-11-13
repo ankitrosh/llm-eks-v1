@@ -1,0 +1,831 @@
+{
+    "apiVersion": "v1",
+    "items": [
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "annotations": {
+                    "batch.kubernetes.io/job-completion-index": "0"
+                },
+                "creationTimestamp": "2026-11-06T10:53:31Z",
+                "generateName": "v3-qwen3-uneven-nccl-0-",
+                "generation": 1,
+                "labels": {
+                    "app": "v3-qwen3-uneven-nccl",
+                    "batch.kubernetes.io/controller-uid": "f344cf1c-420d-4aa7-99fb-7337a3c9adf3",
+                    "batch.kubernetes.io/job-completion-index": "0",
+                    "batch.kubernetes.io/job-name": "v3-qwen3-uneven-nccl",
+                    "controller-uid": "f344cf1c-420d-4aa7-99fb-7337a3c9adf3",
+                    "job-name": "v3-qwen3-uneven-nccl",
+                    "topology.kubernetes.io/region": "us-east-2",
+                    "topology.kubernetes.io/zone": "us-east-2b"
+                },
+                "name": "v3-qwen3-uneven-nccl-0-2z8dv",
+                "namespace": "llm",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "batch/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Job",
+                        "name": "v3-qwen3-uneven-nccl",
+                        "uid": "f344cf1c-420d-4aa7-99fb-7337a3c9adf3"
+                    }
+                ],
+                "resourceVersion": "1921262",
+                "uid": "44568265-bd11-43bf-99d1-30c89441eb79"
+            },
+            "spec": {
+                "affinity": {
+                    "podAntiAffinity": {
+                        "requiredDuringSchedulingIgnoredDuringExecution": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "v3-qwen3-uneven-nccl"
+                                    }
+                                },
+                                "topologyKey": "kubernetes.io/hostname"
+                            }
+                        ]
+                    }
+                },
+                "containers": [
+                    {
+                        "command": [
+                            "python",
+                            "-u",
+                            "/workspace/v3_nccl_qwen3_uneven_integration.py"
+                        ],
+                        "env": [
+                            {
+                                "name": "PYTHONPATH",
+                                "value": "/workspace/src:/workspace:/app:/app/v3"
+                            },
+                            {
+                                "name": "RANK",
+                                "valueFrom": {
+                                    "fieldRef": {
+                                        "apiVersion": "v1",
+                                        "fieldPath": "metadata.annotations['batch.kubernetes.io/job-completion-index']"
+                                    }
+                                }
+                            },
+                            {
+                                "name": "WORLD_SIZE",
+                                "value": "2"
+                            },
+                            {
+                                "name": "MASTER_ADDR",
+                                "value": "v3-qwen3-uneven-nccl-0.v3-qwen3-uneven-nccl-headless.llm.svc.cluster.local"
+                            },
+                            {
+                                "name": "MASTER_PORT",
+                                "value": "29648"
+                            },
+                            {
+                                "name": "V3_CTRL_PORT",
+                                "value": "29649"
+                            },
+                            {
+                                "name": "NCCL_SOCKET_IFNAME",
+                                "value": "eth0"
+                            },
+                            {
+                                "name": "NCCL_IB_DISABLE",
+                                "value": "1"
+                            },
+                            {
+                                "name": "PYTHONUNBUFFERED",
+                                "value": "1"
+                            },
+                            {
+                                "name": "JOB_COMPLETION_INDEX",
+                                "valueFrom": {
+                                    "fieldRef": {
+                                        "apiVersion": "v1",
+                                        "fieldPath": "metadata.labels['batch.kubernetes.io/job-completion-index']"
+                                    }
+                                }
+                            }
+                        ],
+                        "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747",
+                        "imagePullPolicy": "IfNotPresent",
+                        "name": "runtime",
+                        "resources": {
+                            "limits": {
+                                "memory": "6Gi",
+                                "nvidia.com/gpu": "1"
+                            },
+                            "requests": {
+                                "memory": "2Gi",
+                                "nvidia.com/gpu": "1"
+                            }
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File",
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/workspace",
+                                "name": "test-code",
+                                "readOnly": true
+                            },
+                            {
+                                "mountPath": "/dev/shm",
+                                "name": "v3-gpt2-shm"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-cqvvw",
+                                "readOnly": true
+                            }
+                        ]
+                    }
+                ],
+                "dnsPolicy": "ClusterFirst",
+                "enableServiceLinks": true,
+                "hostname": "v3-qwen3-uneven-nccl-0",
+                "nodeName": "ip-192-168-46-104.us-east-2.compute.internal",
+                "nodeSelector": {
+                    "pool": "gpu"
+                },
+                "preemptionPolicy": "PreemptLowerPriority",
+                "priority": 0,
+                "restartPolicy": "Never",
+                "schedulerName": "default-scheduler",
+                "securityContext": {},
+                "serviceAccount": "default",
+                "serviceAccountName": "default",
+                "subdomain": "v3-qwen3-uneven-nccl-headless",
+                "terminationGracePeriodSeconds": 20,
+                "tolerations": [
+                    {
+                        "operator": "Exists"
+                    },
+                    {
+                        "effect": "NoSchedule",
+                        "key": "nvidia.com/gpu",
+                        "operator": "Exists"
+                    }
+                ],
+                "volumes": [
+                    {
+                        "name": "test-code",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "partition",
+                                                "path": "experiments/v3_qwen3_partition.py"
+                                            },
+                                            {
+                                                "key": "stage_only_provider",
+                                                "path": "experiments/v3_qwen3_stage_only_factory.py"
+                                            },
+                                            {
+                                                "key": "runner",
+                                                "path": "v3_nccl_qwen3_uneven_integration.py"
+                                            },
+                                            {
+                                                "key": "provider",
+                                                "path": "experiments/v3_qwen3_process_factory.py"
+                                            },
+                                            {
+                                                "key": "experiments_init",
+                                                "path": "experiments/__init__.py"
+                                            },
+                                            {
+                                                "key": "framework_init",
+                                                "path": "src/llm_runtime/__init__.py"
+                                            },
+                                            {
+                                                "key": "factory",
+                                                "path": "src/llm_runtime/v3_execution_factory.py"
+                                            },
+                                            {
+                                                "key": "scheduler",
+                                                "path": "src/llm_runtime/v3_pipeline_scheduler.py"
+                                            },
+                                            {
+                                                "key": "transport",
+                                                "path": "src/llm_runtime/v3_ordered_rank_transport.py"
+                                            }
+                                        ],
+                                        "name": "v3-qwen3-uneven-nccl-code"
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "emptyDir": {
+                            "medium": "Memory",
+                            "sizeLimit": "1Gi"
+                        },
+                        "name": "v3-gpt2-shm"
+                    },
+                    {
+                        "name": "kube-api-access-cqvvw",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "serviceAccountToken": {
+                                        "expirationSeconds": 3607,
+                                        "path": "token"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "ca.crt",
+                                                "path": "ca.crt"
+                                            }
+                                        ],
+                                        "name": "kube-root-ca.crt"
+                                    }
+                                },
+                                {
+                                    "downwardAPI": {
+                                        "items": [
+                                            {
+                                                "fieldRef": {
+                                                    "apiVersion": "v1",
+                                                    "fieldPath": "metadata.namespace"
+                                                },
+                                                "path": "namespace"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "allocatedResources": {
+                    "memory": "2Gi",
+                    "nvidia.com/gpu": "1"
+                },
+                "conditions": [
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:55:16Z",
+                        "observedGeneration": 1,
+                        "status": "False",
+                        "type": "PodReadyToStartContainers"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:53:31Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "True",
+                        "type": "Initialized"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:55:15Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "False",
+                        "type": "Ready"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:55:15Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "False",
+                        "type": "ContainersReady"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:53:31Z",
+                        "observedGeneration": 1,
+                        "status": "True",
+                        "type": "PodScheduled"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "allocatedResources": {
+                            "memory": "2Gi",
+                            "nvidia.com/gpu": "1"
+                        },
+                        "allocatedResourcesStatus": [
+                            {
+                                "name": "nvidia.com/gpu",
+                                "resources": [
+                                    {
+                                        "health": "Healthy",
+                                        "resourceID": "GPU-4b8c4879-6bdd-d7c2-9a16-9b0667d7fa91"
+                                    }
+                                ]
+                            }
+                        ],
+                        "containerID": "containerd://d492960969a7a79ad64496d8f863004248a6a8e12c0313511cb64a6e49df8069",
+                        "image": "sha256:a60cb7810b225e54cfe20c7233d67d63e8d1b6f90d02cfc8c5ba77497e1abf4d",
+                        "imageID": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747",
+                        "lastState": {},
+                        "name": "runtime",
+                        "ready": false,
+                        "resources": {
+                            "limits": {
+                                "memory": "6Gi",
+                                "nvidia.com/gpu": "1"
+                            },
+                            "requests": {
+                                "memory": "2Gi",
+                                "nvidia.com/gpu": "1"
+                            }
+                        },
+                        "restartCount": 0,
+                        "started": false,
+                        "state": {
+                            "terminated": {
+                                "containerID": "containerd://d492960969a7a79ad64496d8f863004248a6a8e12c0313511cb64a6e49df8069",
+                                "exitCode": 0,
+                                "finishedAt": "2026-11-06T10:55:05Z",
+                                "reason": "Completed",
+                                "startedAt": "2026-11-06T10:54:55Z"
+                            }
+                        },
+                        "user": {
+                            "linux": {
+                                "gid": 0,
+                                "supplementalGroups": [
+                                    0
+                                ],
+                                "uid": 0
+                            }
+                        },
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/workspace",
+                                "name": "test-code",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            },
+                            {
+                                "mountPath": "/dev/shm",
+                                "name": "v3-gpt2-shm"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-cqvvw",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            }
+                        ]
+                    }
+                ],
+                "hostIP": "192.168.46.104",
+                "hostIPs": [
+                    {
+                        "ip": "192.168.46.104"
+                    }
+                ],
+                "observedGeneration": 1,
+                "phase": "Succeeded",
+                "podIP": "192.168.34.223",
+                "podIPs": [
+                    {
+                        "ip": "192.168.34.223"
+                    }
+                ],
+                "qosClass": "Burstable",
+                "resources": {
+                    "limits": {
+                        "memory": "6Gi"
+                    },
+                    "requests": {
+                        "memory": "2Gi"
+                    }
+                },
+                "startTime": "2026-11-06T10:53:31Z"
+            }
+        },
+        {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {
+                "annotations": {
+                    "batch.kubernetes.io/job-completion-index": "1"
+                },
+                "creationTimestamp": "2026-11-06T10:53:31Z",
+                "generateName": "v3-qwen3-uneven-nccl-1-",
+                "generation": 1,
+                "labels": {
+                    "app": "v3-qwen3-uneven-nccl",
+                    "batch.kubernetes.io/controller-uid": "f344cf1c-420d-4aa7-99fb-7337a3c9adf3",
+                    "batch.kubernetes.io/job-completion-index": "1",
+                    "batch.kubernetes.io/job-name": "v3-qwen3-uneven-nccl",
+                    "controller-uid": "f344cf1c-420d-4aa7-99fb-7337a3c9adf3",
+                    "job-name": "v3-qwen3-uneven-nccl",
+                    "topology.kubernetes.io/region": "us-east-2",
+                    "topology.kubernetes.io/zone": "us-east-2b"
+                },
+                "name": "v3-qwen3-uneven-nccl-1-5xf6w",
+                "namespace": "llm",
+                "ownerReferences": [
+                    {
+                        "apiVersion": "batch/v1",
+                        "blockOwnerDeletion": true,
+                        "controller": true,
+                        "kind": "Job",
+                        "name": "v3-qwen3-uneven-nccl",
+                        "uid": "f344cf1c-420d-4aa7-99fb-7337a3c9adf3"
+                    }
+                ],
+                "resourceVersion": "1921261",
+                "uid": "33dea0ce-5f67-46c2-bba7-406783e46ccf"
+            },
+            "spec": {
+                "affinity": {
+                    "podAntiAffinity": {
+                        "requiredDuringSchedulingIgnoredDuringExecution": [
+                            {
+                                "labelSelector": {
+                                    "matchLabels": {
+                                        "app": "v3-qwen3-uneven-nccl"
+                                    }
+                                },
+                                "topologyKey": "kubernetes.io/hostname"
+                            }
+                        ]
+                    }
+                },
+                "containers": [
+                    {
+                        "command": [
+                            "python",
+                            "-u",
+                            "/workspace/v3_nccl_qwen3_uneven_integration.py"
+                        ],
+                        "env": [
+                            {
+                                "name": "PYTHONPATH",
+                                "value": "/workspace/src:/workspace:/app:/app/v3"
+                            },
+                            {
+                                "name": "RANK",
+                                "valueFrom": {
+                                    "fieldRef": {
+                                        "apiVersion": "v1",
+                                        "fieldPath": "metadata.annotations['batch.kubernetes.io/job-completion-index']"
+                                    }
+                                }
+                            },
+                            {
+                                "name": "WORLD_SIZE",
+                                "value": "2"
+                            },
+                            {
+                                "name": "MASTER_ADDR",
+                                "value": "v3-qwen3-uneven-nccl-0.v3-qwen3-uneven-nccl-headless.llm.svc.cluster.local"
+                            },
+                            {
+                                "name": "MASTER_PORT",
+                                "value": "29648"
+                            },
+                            {
+                                "name": "V3_CTRL_PORT",
+                                "value": "29649"
+                            },
+                            {
+                                "name": "NCCL_SOCKET_IFNAME",
+                                "value": "eth0"
+                            },
+                            {
+                                "name": "NCCL_IB_DISABLE",
+                                "value": "1"
+                            },
+                            {
+                                "name": "PYTHONUNBUFFERED",
+                                "value": "1"
+                            },
+                            {
+                                "name": "JOB_COMPLETION_INDEX",
+                                "valueFrom": {
+                                    "fieldRef": {
+                                        "apiVersion": "v1",
+                                        "fieldPath": "metadata.labels['batch.kubernetes.io/job-completion-index']"
+                                    }
+                                }
+                            }
+                        ],
+                        "image": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747",
+                        "imagePullPolicy": "IfNotPresent",
+                        "name": "runtime",
+                        "resources": {
+                            "limits": {
+                                "memory": "6Gi",
+                                "nvidia.com/gpu": "1"
+                            },
+                            "requests": {
+                                "memory": "2Gi",
+                                "nvidia.com/gpu": "1"
+                            }
+                        },
+                        "terminationMessagePath": "/dev/termination-log",
+                        "terminationMessagePolicy": "File",
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/workspace",
+                                "name": "test-code",
+                                "readOnly": true
+                            },
+                            {
+                                "mountPath": "/dev/shm",
+                                "name": "v3-gpt2-shm"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-wdpst",
+                                "readOnly": true
+                            }
+                        ]
+                    }
+                ],
+                "dnsPolicy": "ClusterFirst",
+                "enableServiceLinks": true,
+                "hostname": "v3-qwen3-uneven-nccl-1",
+                "nodeName": "ip-192-168-39-205.us-east-2.compute.internal",
+                "nodeSelector": {
+                    "pool": "gpu"
+                },
+                "preemptionPolicy": "PreemptLowerPriority",
+                "priority": 0,
+                "restartPolicy": "Never",
+                "schedulerName": "default-scheduler",
+                "securityContext": {},
+                "serviceAccount": "default",
+                "serviceAccountName": "default",
+                "subdomain": "v3-qwen3-uneven-nccl-headless",
+                "terminationGracePeriodSeconds": 20,
+                "tolerations": [
+                    {
+                        "operator": "Exists"
+                    },
+                    {
+                        "effect": "NoSchedule",
+                        "key": "nvidia.com/gpu",
+                        "operator": "Exists"
+                    }
+                ],
+                "volumes": [
+                    {
+                        "name": "test-code",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "partition",
+                                                "path": "experiments/v3_qwen3_partition.py"
+                                            },
+                                            {
+                                                "key": "stage_only_provider",
+                                                "path": "experiments/v3_qwen3_stage_only_factory.py"
+                                            },
+                                            {
+                                                "key": "runner",
+                                                "path": "v3_nccl_qwen3_uneven_integration.py"
+                                            },
+                                            {
+                                                "key": "provider",
+                                                "path": "experiments/v3_qwen3_process_factory.py"
+                                            },
+                                            {
+                                                "key": "experiments_init",
+                                                "path": "experiments/__init__.py"
+                                            },
+                                            {
+                                                "key": "framework_init",
+                                                "path": "src/llm_runtime/__init__.py"
+                                            },
+                                            {
+                                                "key": "factory",
+                                                "path": "src/llm_runtime/v3_execution_factory.py"
+                                            },
+                                            {
+                                                "key": "scheduler",
+                                                "path": "src/llm_runtime/v3_pipeline_scheduler.py"
+                                            },
+                                            {
+                                                "key": "transport",
+                                                "path": "src/llm_runtime/v3_ordered_rank_transport.py"
+                                            }
+                                        ],
+                                        "name": "v3-qwen3-uneven-nccl-code"
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "emptyDir": {
+                            "medium": "Memory",
+                            "sizeLimit": "1Gi"
+                        },
+                        "name": "v3-gpt2-shm"
+                    },
+                    {
+                        "name": "kube-api-access-wdpst",
+                        "projected": {
+                            "defaultMode": 420,
+                            "sources": [
+                                {
+                                    "serviceAccountToken": {
+                                        "expirationSeconds": 3607,
+                                        "path": "token"
+                                    }
+                                },
+                                {
+                                    "configMap": {
+                                        "items": [
+                                            {
+                                                "key": "ca.crt",
+                                                "path": "ca.crt"
+                                            }
+                                        ],
+                                        "name": "kube-root-ca.crt"
+                                    }
+                                },
+                                {
+                                    "downwardAPI": {
+                                        "items": [
+                                            {
+                                                "fieldRef": {
+                                                    "apiVersion": "v1",
+                                                    "fieldPath": "metadata.namespace"
+                                                },
+                                                "path": "namespace"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            },
+            "status": {
+                "allocatedResources": {
+                    "memory": "2Gi",
+                    "nvidia.com/gpu": "1"
+                },
+                "conditions": [
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:55:15Z",
+                        "observedGeneration": 1,
+                        "status": "False",
+                        "type": "PodReadyToStartContainers"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:53:31Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "True",
+                        "type": "Initialized"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:55:14Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "False",
+                        "type": "Ready"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:55:14Z",
+                        "observedGeneration": 1,
+                        "reason": "PodCompleted",
+                        "status": "False",
+                        "type": "ContainersReady"
+                    },
+                    {
+                        "lastProbeTime": null,
+                        "lastTransitionTime": "2026-11-06T10:53:31Z",
+                        "observedGeneration": 1,
+                        "status": "True",
+                        "type": "PodScheduled"
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "allocatedResources": {
+                            "memory": "2Gi",
+                            "nvidia.com/gpu": "1"
+                        },
+                        "allocatedResourcesStatus": [
+                            {
+                                "name": "nvidia.com/gpu",
+                                "resources": [
+                                    {
+                                        "health": "Healthy",
+                                        "resourceID": "GPU-63775a08-8256-9567-7b42-1a4d45fc3012"
+                                    }
+                                ]
+                            }
+                        ],
+                        "containerID": "containerd://88534318acda6483cd3fa756ac879296fa52f9880df74f1c4e6dcf4ff2a94b23",
+                        "image": "sha256:a60cb7810b225e54cfe20c7233d67d63e8d1b6f90d02cfc8c5ba77497e1abf4d",
+                        "imageID": "657173565477.dkr.ecr.us-east-2.amazonaws.com/qwen3-14b-pipeline@sha256:514663c208715815ed3516b2dbce2e94158207ffd7adf11348449d95441fd747",
+                        "lastState": {},
+                        "name": "runtime",
+                        "ready": false,
+                        "resources": {
+                            "limits": {
+                                "memory": "6Gi",
+                                "nvidia.com/gpu": "1"
+                            },
+                            "requests": {
+                                "memory": "2Gi",
+                                "nvidia.com/gpu": "1"
+                            }
+                        },
+                        "restartCount": 0,
+                        "started": false,
+                        "state": {
+                            "terminated": {
+                                "containerID": "containerd://88534318acda6483cd3fa756ac879296fa52f9880df74f1c4e6dcf4ff2a94b23",
+                                "exitCode": 0,
+                                "finishedAt": "2026-11-06T10:55:05Z",
+                                "reason": "Completed",
+                                "startedAt": "2026-11-06T10:54:54Z"
+                            }
+                        },
+                        "user": {
+                            "linux": {
+                                "gid": 0,
+                                "supplementalGroups": [
+                                    0
+                                ],
+                                "uid": 0
+                            }
+                        },
+                        "volumeMounts": [
+                            {
+                                "mountPath": "/workspace",
+                                "name": "test-code",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            },
+                            {
+                                "mountPath": "/dev/shm",
+                                "name": "v3-gpt2-shm"
+                            },
+                            {
+                                "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                                "name": "kube-api-access-wdpst",
+                                "readOnly": true,
+                                "recursiveReadOnly": "Disabled"
+                            }
+                        ]
+                    }
+                ],
+                "hostIP": "192.168.39.205",
+                "hostIPs": [
+                    {
+                        "ip": "192.168.39.205"
+                    }
+                ],
+                "observedGeneration": 1,
+                "phase": "Succeeded",
+                "podIP": "192.168.61.192",
+                "podIPs": [
+                    {
+                        "ip": "192.168.61.192"
+                    }
+                ],
+                "qosClass": "Burstable",
+                "resources": {
+                    "limits": {
+                        "memory": "6Gi"
+                    },
+                    "requests": {
+                        "memory": "2Gi"
+                    }
+                },
+                "startTime": "2026-11-06T10:53:31Z"
+            }
+        }
+    ],
+    "kind": "List",
+    "metadata": {
+        "resourceVersion": ""
+    }
+}

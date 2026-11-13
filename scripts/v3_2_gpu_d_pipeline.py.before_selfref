@@ -1,0 +1,1856 @@
+"""V3.2 Phase D: continuous GPU microbatching.
+
+Two-rank Qwen3-14B inference:
+- One shared BlockKVCache per GPU
+- Dynamic admission of requests
+- Batched prefill and decode
+- Overlapping execution across two stages
+- Batched NCCL token feedback
+- Request-ID mapping and acknowledged KV release
+"""
+
+import os
+import queue
+import threading
+import time
+import traceback
+
+from dataclasses import dataclass, field
+from datetime import timedelta
+
+import torch
+import torch.distributed as dist
+
+from llm_runtime.providers.v3_1_qwen3_nrank_factory import (
+    Qwen3NRankStageOnlyFactory,
+)
+
+from llm_runtime.v3_2_kv_storage import BlockKVCache
+
+from llm_runtime.v3_2_qwen3_stage_prefill import (
+    PrefillHidden,
+    stage_block_prefill,
+)
+
+from llm_runtime.v3_2_qwen3_stage_batch import (
+    stage_block_decode,
+)
+
+
+STOP = 0
+PREFILL = 1
+DECODE = 2
+RELEASE = 3
+
+DEVICE = torch.device("cuda:0")
+
+# Diagnostic reference only; lives in rank-0 process.
+D_STAGE0_REFERENCE = {}
+D_STAGE0_REPLAY = {}
+
+
+
+def ints(values):
+    return torch.tensor(
+        values,
+        dtype=torch.int64,
+        device=DEVICE,
+    )
+
+
+def tensor_output(value):
+    if isinstance(value, torch.Tensor):
+        return value
+
+    for name in ("hidden", "payload", "tensor", "states"):
+        result = getattr(value, name, None)
+
+        if isinstance(result, torch.Tensor):
+            return result
+
+    raise TypeError(
+        f"Unexpected stage output: {type(value)}"
+    )
+
+
+def new_cache(stage, max_active, prompt_tokens, output_tokens):
+    block_size = 16
+
+    max_context = prompt_tokens + output_tokens + 8
+    max_context = (
+        (max_context + block_size - 1) // block_size
+    ) * block_size
+
+    blocks_per_request = (
+        max_context + block_size - 1
+    ) // block_size
+
+    capacity = max_active * blocks_per_request
+
+    return BlockKVCache(
+        layers=len(stage.model.owned_layers),
+        capacity_blocks=capacity,
+        block_size=block_size,
+        kv_heads=stage.config.num_key_value_heads,
+        head_dim=stage.config.head_dim,
+        max_context_tokens=max_context,
+        dtype=torch.bfloat16,
+        device="cuda:0",
+    )
+
+
+def stage_forward(stage, cache, phase, ids, positions, payload):
+    assert len(ids) > 0
+    assert len(ids) == len(positions)
+
+    if phase == PREFILL:
+        assert all(pos == 0 for pos in positions)
+
+        if stage.rank == 0:
+            result = stage_block_prefill(
+                stage,
+                cache,
+                ids,
+                positions,
+                payload,
+            )
+
+        else:
+            hidden = payload
+
+            assert hidden.ndim == 3
+            assert hidden.shape[0] == len(ids)
+
+            result = stage_block_prefill(
+                stage,
+                cache,
+                ids,
+                positions,
+                PrefillHidden(
+                    hidden,
+                    (hidden.shape[1],) * len(ids),
+                ),
+            )
+
+    else:
+        assert phase == DECODE
+
+        result = stage_block_decode(
+            stage,
+            cache,
+            ids,
+            payload,
+        )
+
+    return tensor_output(result)
+
+
+@dataclass
+class Request:
+    rid: int
+    prompt: tuple
+    max_new: int
+    arrival_s: float = 0.0
+
+    status: str = "waiting"
+    tokens: list = field(default_factory=list)
+
+    admitted_at: float = -1.0
+    first_token_at: float = -1.0
+    done_at: float = -1.0
+
+
+@dataclass
+class Batch:
+    seq: int
+    phase: int
+    ids: tuple
+    positions: tuple
+    payload: torch.Tensor
+
+
+class GPUContinuousBatchPlanner:
+    """Bounded FCFS admission with dynamic GPU microbatches.
+
+    Prefill and decode are separate phases.
+    Batch membership can change each iteration.
+    """
+
+    def __init__(self, max_active, max_batch):
+        self.max_active = max_active
+        self.max_batch = max_batch
+        self.prefer_prefill = True
+
+    def admit(self, requests, now):
+        active = sum(
+            r.status in ("pending", "ready", "inflight")
+            for r in requests
+        )
+
+        admitted = 0
+
+        for req in requests:
+            if active >= self.max_active:
+                break
+
+            if (
+                req.status == "waiting"
+                and req.arrival_s <= now
+            ):
+                req.status = "pending"
+                req.admitted_at = now
+
+                active += 1
+                admitted += 1
+
+        return admitted
+
+    def pick(self, requests):
+        waiting = [
+            r for r in requests
+            if r.status == "pending"
+        ]
+
+        decoding = [
+            r for r in requests
+            if r.status == "ready"
+        ]
+
+        if not waiting and not decoding:
+            return None, ()
+
+        if waiting and decoding:
+            phase = (
+                PREFILL if self.prefer_prefill
+                else DECODE
+            )
+
+            self.prefer_prefill = not self.prefer_prefill
+
+        else:
+            phase = (
+                PREFILL if waiting
+                else DECODE
+            )
+
+        if phase == PREFILL:
+            # Prefill batching currently requires equal lengths.
+            length = len(waiting[0].prompt)
+
+            selected = [
+                r for r in waiting
+                if len(r.prompt) == length
+            ]
+
+        else:
+            selected = decoding
+
+        return phase, tuple(
+            selected[:self.max_batch]
+        )
+
+
+class Network:
+    """Rank0 ordered transport worker."""
+
+    def __init__(self):
+        self.outgoing = queue.Queue(maxsize=3)
+        self.results = queue.Queue()
+        self.send_time_s = 0.0
+        self.response_time_s = 0.0
+
+        self.thread = threading.Thread(
+            target=self._loop,
+            daemon=True,
+        )
+
+        self.thread.start()
+
+    def _loop(self):
+        try:
+            while True:
+                op, seq, ids, positions, hidden = (
+                    self.outgoing.get()
+                )
+
+                if op == STOP:
+                    dist.send(
+                        ints((STOP, 0, 0, 0)),
+                        dst=1,
+                    )
+
+                    self.results.put(
+                        ("stopped", 0, (), None)
+                    )
+                    return
+
+                count = len(ids)
+
+                width = (
+                    0 if hidden is None
+                    else hidden.shape[1]
+                )
+
+                # Header:
+                # opcode, batch sequence, batch size, length.
+                send_started = time.perf_counter()
+                dist.send(
+                    ints((op, seq, count, width)),
+                    dst=1,
+                )
+
+                # Preserve request ordering explicitly.
+                dist.send(
+                    ints(ids),
+                    dst=1,
+                )
+
+                if op in (PREFILL, DECODE):
+                    dist.send(
+                        ints(positions),
+                        dst=1,
+                    )
+
+                    dist.send(
+                        hidden.contiguous(),
+                        dst=1,
+                    )
+
+                self.send_time_s += (
+                    time.perf_counter() - send_started
+                )
+                response_started = time.perf_counter()
+
+                response = torch.empty(
+                    3,
+                    device=DEVICE,
+                    dtype=torch.int64,
+                )
+
+                dist.recv(response, src=1)
+
+                status, response_seq, response_size = (
+                    response.cpu().tolist()
+                )
+
+                if (
+                    status != op
+                    or response_seq != seq
+                    or response_size != count
+                ):
+                    raise RuntimeError(
+                        "Wire response mismatch: "
+                        f"{(op, seq, count)} vs "
+                        f"{response.tolist()}"
+                    )
+
+                if op == RELEASE:
+                    self.response_time_s += (
+                        time.perf_counter() - response_started
+                    )
+                    self.results.put(
+                        ("release", seq, ids, None)
+                    )
+
+                else:
+                    tokens = torch.empty(
+                        count,
+                        device=DEVICE,
+                        dtype=torch.int64,
+                    )
+
+                    dist.recv(tokens, src=1)
+                    self.response_time_s += (
+                        time.perf_counter() - response_started
+                    )
+
+                    self.results.put((
+                        "forward",
+                        seq,
+                        ids,
+                        tokens.cpu().tolist(),
+                    ))
+
+        except BaseException as exc:
+            self.results.put((
+                "error",
+                -1,
+                (),
+                (exc, traceback.format_exc()),
+            ))
+
+    def send_batch(self, batch):
+        self.outgoing.put((
+            batch.phase,
+            batch.seq,
+            batch.ids,
+            batch.positions,
+            batch.payload,
+        ))
+
+    def release(self, seq, ids):
+        self.outgoing.put((
+            RELEASE,
+            seq,
+            tuple(ids),
+            (),
+            None,
+        ))
+
+    def stop(self):
+        self.outgoing.put(
+            (STOP, 0, (), (), None)
+        )
+
+        self.thread.join(timeout=30)
+
+        if self.thread.is_alive():
+            raise RuntimeError(
+                "Transport shutdown did not complete"
+            )
+
+
+def run_rank1(stage, cache):
+    numeric_enabled = (
+        os.getenv("D_NUMERIC_CHECK", "0") == "1"
+    )
+
+    numeric_reference = {}
+
+    numeric_stats = {
+        batch: {
+            "vectors": 0,
+            "top1_mismatches": 0,
+            "large_margin_mismatches": 0,
+            "max_abs": 0.0,
+            "max_rel_l2": 0.0,
+            "sum_rel_l2": 0.0,
+        }
+        for batch in (2, 4)
+    }
+
+    totals = {
+        "prefill": 0,
+        "decode": 0,
+        "release": 0,
+    }
+    gpu_compute_s = 0.0
+
+    while True:
+        header = torch.empty(
+            4,
+            device=DEVICE,
+            dtype=torch.int64,
+        )
+
+        dist.recv(header, src=0)
+
+        op, seq, batch_size, seq_len = (
+            header.cpu().tolist()
+        )
+
+        if op == STOP:
+            break
+
+        if (
+            op not in (PREFILL, DECODE, RELEASE)
+            or batch_size < 1
+        ):
+            raise RuntimeError(
+                f"Unsupported wire header: {header.tolist()}"
+            )
+
+        ids_tensor = torch.empty(
+            batch_size,
+            device=DEVICE,
+            dtype=torch.int64,
+        )
+
+        dist.recv(ids_tensor, src=0)
+
+        ids = tuple(
+            int(x) for x in ids_tensor.cpu().tolist()
+        )
+
+        if op == RELEASE:
+            for rid in ids:
+                assert cache.release_request(rid), (
+                    f"Rank1 missing released request {rid}"
+                )
+
+            totals["release"] += batch_size
+
+            dist.send(
+                ints((op, seq, batch_size)),
+                dst=0,
+            )
+
+            continue
+
+        positions_tensor = torch.empty(
+            batch_size,
+            device=DEVICE,
+            dtype=torch.int64,
+        )
+
+        dist.recv(positions_tensor, src=0)
+
+        positions = tuple(
+            int(x)
+            for x in positions_tensor.cpu().tolist()
+        )
+
+        hidden = torch.empty(
+            (
+                batch_size,
+                seq_len,
+                stage.config.hidden_size,
+            ),
+            device=DEVICE,
+            dtype=torch.bfloat16,
+        )
+
+        dist.recv(hidden, src=0)
+
+        gpu_started = time.perf_counter()
+
+        out = stage_forward(
+            stage,
+            cache,
+            op,
+            ids,
+            positions,
+            hidden,
+        )
+
+        if out.ndim == 3:
+            out = out[:, -1, :]
+
+        assert out.ndim == 2
+        assert out.shape[0] == batch_size
+
+        if numeric_enabled:
+            for index, rid in enumerate(ids):
+                case_tag = (rid >> 48) & 255
+                slot = (rid >> 40) & 255
+
+                if case_tag not in (1, 2, 4):
+                    continue
+
+                position = (
+                    -1
+                    if op == PREFILL
+                    else positions[index]
+                )
+
+                key = (slot, position)
+
+                actual = (
+                    out[index]
+                    .detach()
+                    .float()
+                    .cpu()
+                )
+
+                assert torch.isfinite(actual).all(), (
+                    f"Nonfinite logits: {key}"
+                )
+
+                if case_tag == 1:
+                    assert key not in numeric_reference
+                    numeric_reference[key] = actual
+                    continue
+
+                expected = numeric_reference.get(key)
+
+                assert expected is not None, (
+                    f"Missing B1 reference for {key}"
+                )
+
+                assert actual.shape == expected.shape
+
+                diff = actual - expected
+
+                max_abs = float(
+                    diff.abs().max().item()
+                )
+
+                rel_l2 = float(
+                    (
+                        torch.linalg.vector_norm(diff)
+                        / torch.linalg.vector_norm(
+                            expected
+                        ).clamp_min(1e-12)
+                    ).item()
+                )
+
+                expected_top2 = torch.topk(
+                    expected, k=2
+                )
+
+                expected_token = int(
+                    expected_top2.indices[0]
+                )
+
+                actual_token = int(
+                    actual.argmax().item()
+                )
+
+                margin = float(
+                    expected_top2.values[0]
+                    - expected_top2.values[1]
+                )
+
+                stats = numeric_stats[case_tag]
+
+                stats["vectors"] += 1
+                stats["max_abs"] = max(
+                    stats["max_abs"],
+                    max_abs,
+                )
+                stats["max_rel_l2"] = max(
+                    stats["max_rel_l2"],
+                    rel_l2,
+                )
+                stats["sum_rel_l2"] += rel_l2
+
+                # Investigate unusually large full-vector
+                # errors under identical token histories.
+                if rel_l2 >= 0.08 or max_abs >= 1.5:
+                    largest = torch.topk(
+                        diff.abs(),
+                        k=min(6, diff.numel()),
+                    )
+
+                    error_details = []
+
+                    for token_id in largest.indices.tolist():
+                        token_id = int(token_id)
+
+                        error_details.append((
+                            token_id,
+                            round(
+                                float(expected[token_id]),
+                                5,
+                            ),
+                            round(
+                                float(actual[token_id]),
+                                5,
+                            ),
+                        ))
+
+                    expected_norm = float(
+                        torch.linalg.vector_norm(
+                            expected
+                        ).item()
+                    )
+
+                    actual_norm = float(
+                        torch.linalg.vector_norm(
+                            actual
+                        ).item()
+                    )
+
+                    print(
+                        f"D_NUMERIC_OUTLIER "
+                        f"batch={case_tag} "
+                        f"slot={slot} "
+                        f"position={position} "
+                        f"phase={'prefill' if op == PREFILL else 'decode'} "
+                        f"relative_l2={rel_l2:.8f} "
+                        f"max_abs={max_abs:.6f} "
+                        f"reference_norm={expected_norm:.5f} "
+                        f"actual_norm={actual_norm:.5f} "
+                        f"reference_top1={expected_token} "
+                        f"actual_top1={actual_token} "
+                        f"reference_margin={margin:.6f} "
+                        f"largest_differences={error_details}",
+                        flush=True,
+                    )
+
+                if expected_token != actual_token:
+                    stats["top1_mismatches"] += 1
+
+                    if margin >= 0.5:
+                        stats[
+                            "large_margin_mismatches"
+                        ] += 1
+
+                    print(
+                        f"D_NUMERIC_TOP1_DIFF "
+                        f"batch={case_tag} "
+                        f"slot={slot} "
+                        f"position={position} "
+                        f"reference={expected_token} "
+                        f"actual={actual_token} "
+                        f"reference_margin={margin:.6f} "
+                        f"max_abs={max_abs:.6f} "
+                        f"relative_l2={rel_l2:.8f}",
+                        flush=True,
+                    )
+
+        # Sample on final GPU.
+        # Return one int64 token per request.
+        tokens = (
+            out.argmax(dim=-1)
+            .to(torch.int64)
+            .contiguous()
+        )
+
+        # Diagnose early batch-dependent top-1 differences.
+        # Does not alter sampling or the model forward.
+        if (
+            os.getenv("D_LOGIT_DIAG", "0") == "1"
+            and op == DECODE
+        ):
+            prompt_len = int(
+                os.getenv("V32_PROMPT_TOKENS", "128")
+            )
+
+            watched = {
+                prompt_len,
+                prompt_len + 2,
+            }
+
+            if any(p in watched for p in positions):
+                top = torch.topk(
+                    out.float(), k=4, dim=-1
+                )
+
+                top_ids = top.indices.cpu().tolist()
+                top_values = top.values.cpu().tolist()
+                chosen = tokens.cpu().tolist()
+
+                probe_ids = (200, 220, 226, 229)
+                probe_values = (
+                    out[:, list(probe_ids)]
+                    .float().cpu().tolist()
+                )
+
+                for i, (rid, position) in enumerate(
+                    zip(ids, positions)
+                ):
+                    if position not in watched:
+                        continue
+
+                    gap = (
+                        top_values[i][0]
+                        - top_values[i][1]
+                    )
+
+                    print(
+                        f"D_LOGIT_DIAG rid={rid} "
+                        f"position={position} "
+                        f"batch={batch_size} "
+                        f"greedy={chosen[i]} "
+                        f"top4={list(zip(top_ids[i], top_values[i]))} "
+                        f"top_gap={gap:.7f} "
+                        f"probe={dict(zip(probe_ids, probe_values[i]))}",
+                        flush=True,
+                    )
+
+        torch.cuda.synchronize()
+        gpu_compute_s += (
+            time.perf_counter() - gpu_started
+        )
+
+        dist.send(
+            ints((op, seq, batch_size)),
+            dst=0,
+        )
+
+        dist.send(
+            tokens,
+            dst=0,
+        )
+
+        totals[
+            "prefill" if op == PREFILL else "decode"
+        ] += 1
+
+    assert not cache._committed, (
+        "Rank1 KV leak after all releases"
+    )
+
+    if numeric_enabled:
+        output_len = int(
+            os.getenv("V32_NEW_TOKENS", "16")
+        )
+
+        expected_vectors = 4 * output_len
+
+        assert (
+            len(numeric_reference)
+            == expected_vectors
+        ), (
+            "Incomplete B1 reference logits: "
+            f"{len(numeric_reference)} "
+            f"vs {expected_vectors}"
+        )
+
+        for batch, stats in numeric_stats.items():
+            assert (
+                stats["vectors"] == expected_vectors
+            ), (
+                f"Incomplete B{batch} comparison: "
+                f"{stats['vectors']} "
+                f"vs {expected_vectors}"
+            )
+
+            mean_rel_l2 = (
+                stats["sum_rel_l2"]
+                / stats["vectors"]
+            )
+
+            print(
+                f"D_NUMERIC_SUMMARY "
+                f"batch={batch} "
+                f"vectors={stats['vectors']} "
+                f"max_abs={stats['max_abs']:.6f} "
+                f"max_relative_l2="
+                f"{stats['max_rel_l2']:.8f} "
+                f"mean_relative_l2="
+                f"{mean_rel_l2:.8f} "
+                f"top1_mismatches="
+                f"{stats['top1_mismatches']} "
+                f"large_margin_mismatches="
+                f"{stats['large_margin_mismatches']}",
+                flush=True,
+            )
+
+        if any(
+            stats["large_margin_mismatches"] != 0
+            for stats in numeric_stats.values()
+        ):
+            raise AssertionError(
+                "Batching changed high-margin predictions"
+            )
+
+        print(
+            "D_NUMERIC_DIAGNOSTIC_COMPLETE",
+            flush=True,
+        )
+
+    print(
+        f"D_RANK1_PROFILE "
+        f"gpu_compute_s={gpu_compute_s:.4f} "
+        f"forward_batches="
+        f"{totals['prefill'] + totals['decode']}",
+        flush=True,
+    )
+
+    print(
+        f"D_RANK1_DONE {totals} {cache.snapshot()}",
+        flush=True,
+    )
+
+
+def prompts(count, length, vocab):
+    modulus = min(vocab - 51, 4096)
+
+    return [
+        tuple(
+            (i + request * 29) % modulus + 50
+            for i in range(length)
+        )
+        for request in range(count)
+    ]
+
+
+def run_case(
+    stage,
+    cache,
+    network,
+    seq_counter,
+    *,
+    label,
+    num_requests,
+    input_len,
+    output_len,
+    batch_size,
+    staggered,
+    force_tokens=None,
+):
+    generated_prompts = prompts(
+        num_requests,
+        input_len,
+        stage.config.vocab_size,
+    )
+
+    arrivals = (
+        [0.0] * min(4, num_requests)
+        + [
+            0.35 * (i + 1)
+            for i in range(max(0, num_requests - 4))
+        ]
+    )
+
+    if not staggered:
+        arrivals = [0.0] * num_requests
+
+    numeric_tag = {
+        "measured_b1": 1,
+        "measured_b2": 2,
+        "measured_b4": 4,
+    }.get(label, 0)
+
+    numeric_enabled = (
+        os.getenv("D_NUMERIC_CHECK", "0") == "1"
+    )
+
+    requests = [
+        Request(
+            (
+                (numeric_tag << 48)
+                | ((i + 1) << 40)
+                | (seq_counter[0] + i + 1)
+            )
+            if numeric_enabled and numeric_tag
+            else seq_counter[0] + i + 1,
+            generated_prompts[i],
+            output_len,
+            arrivals[i],
+        )
+        for i in range(num_requests)
+    ]
+
+    seq_counter[0] += num_requests
+
+    by_id = {
+        r.rid: r
+        for r in requests
+    }
+
+    print(
+        f"D_CASE_IDS label={label} "
+        f"ids={[r.rid for r in requests]}",
+        flush=True,
+    )
+
+    reference_by_id = {}
+    if force_tokens is not None:
+        assert len(force_tokens) <= len(requests)
+        reference_by_id = {
+            requests[i].rid: tuple(tokens)
+            for i, tokens in enumerate(force_tokens)
+        }
+
+    planner = GPUContinuousBatchPlanner(
+        max_active=int(
+            os.getenv("D_MAX_ACTIVE", "8")
+        ),
+        max_batch=batch_size,
+    )
+
+    inflight = {}
+    release_acks = set()
+    sent_releases = set()
+
+    batch_shapes = []
+
+    counts = {
+        "prefill_batches": 0,
+        "decode_batches": 0,
+        "max_inflight": 0,
+        "later_admitted": 0,
+    }
+
+    start = time.perf_counter()
+
+    stage0_numeric_count = 0
+    stage0_numeric_max_rel = 0.0
+    stage0_numeric_worst = None
+
+    stage0_gpu_s = 0.0
+    result_wait_s = 0.0
+    send_start_s = network.send_time_s
+    response_start_s = network.response_time_s
+
+    def seq():
+        seq_counter[0] += 1
+        return seq_counter[0]
+
+    while (
+        any(r.status != "done" for r in requests)
+        or inflight
+        or len(release_acks) < num_requests
+    ):
+        now = time.perf_counter() - start
+
+        admitted = planner.admit(
+            requests,
+            now,
+        )
+
+        if now > 0.01:
+            counts["later_admitted"] += admitted
+
+        phase, selected = planner.pick(requests)
+
+        if selected and len(inflight) < int(os.getenv("D_MAX_INFLIGHT", "2")):
+            ids = tuple(
+                r.rid for r in selected
+            )
+
+            positions = tuple(
+                0 if phase == PREFILL
+                else len(r.prompt) + len(r.tokens) - 1
+                for r in selected
+            )
+
+            if phase == PREFILL:
+                payload = tuple(
+                    r.prompt for r in selected
+                )
+
+            else:
+                payload = tuple(
+                    reference_by_id[r.rid][len(r.tokens) - 1]
+                    if r.rid in reference_by_id
+                    else r.tokens[-1]
+                    for r in selected
+                )
+
+            compute_started = time.perf_counter()
+
+            hidden = stage_forward(
+                stage,
+                cache,
+                phase,
+                ids,
+                positions,
+                payload,
+            )
+
+            assert hidden.is_cuda
+            assert hidden.ndim == 3
+            assert hidden.shape[0] == len(ids)
+
+            # Ensure tensors are ready for the transport thread.
+            torch.cuda.synchronize()
+            stage0_gpu_s += (
+                time.perf_counter() - compute_started
+            )
+
+            if (
+                os.getenv("D_STAGE0_DIAG", "0") == "1"
+                and label in (
+                    "measured_b1",
+                    "measured_b2",
+                    "measured_b4",
+                )
+            ):
+                slot_by_id = {
+                    req.rid: i + 1
+                    for i, req in enumerate(requests)
+                }
+
+                watched_positions = {
+                    -1, 128, 130, 144, 149,
+                    150, 159, 160, 162, 165,
+                    171, 172, 176, 180, 181, 190,
+                }
+
+                for i, rid in enumerate(ids):
+                    slot = slot_by_id[rid]
+
+                    position = (
+                        -1 if phase == PREFILL
+                        else positions[i]
+                    )
+
+                    key = (slot, position)
+
+                    current = (
+                        hidden[i, -1, :]
+                        .detach()
+                        .float()
+                        .cpu()
+                    )
+
+                    assert torch.isfinite(
+                        current
+                    ).all()
+
+                    if label == "measured_b1":
+                        assert key not in D_STAGE0_REFERENCE
+                        D_STAGE0_REFERENCE[key] = current
+                        continue
+
+                    expected = D_STAGE0_REFERENCE.get(key)
+
+                    assert expected is not None, (
+                        f"Missing stage0 reference: {key}"
+                    )
+
+                    assert current.shape == expected.shape
+
+                    difference = current - expected
+
+                    max_abs = float(
+                        difference.abs().max().item()
+                    )
+
+                    rel_l2 = float(
+                        (
+                            torch.linalg.vector_norm(
+                                difference
+                            )
+                            / torch.linalg.vector_norm(
+                                expected
+                            ).clamp_min(1e-12)
+                        ).item()
+                    )
+
+                    stage0_numeric_count += 1
+
+                    if rel_l2 > stage0_numeric_max_rel:
+                        stage0_numeric_max_rel = rel_l2
+                        stage0_numeric_worst = key
+
+                    if (
+                        slot == 4
+                        and (
+                            position in watched_positions
+                            or rel_l2 >= 0.05
+                        )
+                    ):
+                        print(
+                            f"D_STAGE0_DIFF "
+                            f"batch={batch_size} "
+                            f"slot={slot} "
+                            f"position={position} "
+                            f"relative_l2={rel_l2:.8f} "
+                            f"max_abs={max_abs:.6f}",
+                            flush=True,
+                        )
+
+            if (
+                os.getenv("D_STAGE0_REPLAY", "0") == "1"
+                and label in (
+                    "measured_b1",
+                    "measured_b2",
+                    "measured_b4",
+                )
+            ):
+                slot_by_id = {
+                    request.rid: i + 1
+                    for i, request in enumerate(requests)
+                }
+
+                def replay_key(index, rid):
+                    position = (
+                        -1 if phase == PREFILL
+                        else positions[index]
+                    )
+                    return slot_by_id[rid], position
+
+                if label == "measured_b1":
+                    # Store the ENTIRE prefill sequence
+                    # and each decode activation.
+                    for i, rid in enumerate(ids):
+                        key = replay_key(i, rid)
+
+                        assert key not in D_STAGE0_REPLAY
+
+                        D_STAGE0_REPLAY[key] = (
+                            hidden[i]
+                            .detach()
+                            .cpu()
+                            .clone()
+                        )
+
+                else:
+                    reference_rows = []
+
+                    for i, rid in enumerate(ids):
+                        key = replay_key(i, rid)
+
+                        expected = D_STAGE0_REPLAY.get(
+                            key
+                        )
+
+                        assert expected is not None, (
+                            f"Missing replay tensor: {key}"
+                        )
+
+                        assert (
+                            expected.shape == hidden[i].shape
+                        ), (
+                            f"Replay shape mismatch at {key}: "
+                            f"{expected.shape} vs "
+                            f"{hidden[i].shape}"
+                        )
+
+                        reference_rows.append(expected)
+
+                    # This is diagnostic-only:
+                    # rank 1 receives the exact B1
+                    # stage-0 activation history.
+                    hidden = torch.stack(
+                        reference_rows,
+                        dim=0,
+                    ).to(
+                        device=hidden.device,
+                        dtype=hidden.dtype,
+                    )
+
+            batch = Batch(
+                seq(),
+                phase,
+                ids,
+                positions,
+                hidden.contiguous(),
+            )
+
+            network.send_batch(batch)
+
+            inflight[batch.seq] = batch
+
+            for r in selected:
+                r.status = "inflight"
+
+            batch_shapes.append(
+                (phase, len(ids))
+            )
+
+            key = (
+                "prefill_batches"
+                if phase == PREFILL
+                else "decode_batches"
+            )
+
+            counts[key] += 1
+
+            counts["max_inflight"] = max(
+                counts["max_inflight"],
+                len(inflight),
+            )
+
+            continue
+
+        wait_started = time.perf_counter()
+        try:
+            kind, result_seq, ids, value = (
+                network.results.get(timeout=0.02)
+            )
+
+        except queue.Empty:
+            result_wait_s += (
+                time.perf_counter() - wait_started
+            )
+            continue
+
+        result_wait_s += (
+            time.perf_counter() - wait_started
+        )
+
+        if kind == "error":
+            exc, tb = value
+
+            raise RuntimeError(
+                f"Remote transport error: {exc}\n{tb}"
+            ) from exc
+
+        if kind == "release":
+            assert result_seq in sent_releases
+
+            sent_releases.remove(result_seq)
+            release_acks.update(ids)
+
+            continue
+
+        if kind != "forward":
+            raise RuntimeError(
+                f"Unexpected network event: {kind}"
+            )
+
+        batch = inflight.pop(result_seq)
+
+        assert batch.ids == ids
+        assert len(ids) == len(value)
+
+        completed = []
+
+        for rid, token in zip(ids, value):
+            r = by_id[rid]
+
+            assert r.status == "inflight"
+            assert r.rid == rid
+
+            if not r.tokens:
+                r.first_token_at = (
+                    time.perf_counter() - start
+                )
+
+            r.tokens.append(int(token))
+
+            if len(r.tokens) >= r.max_new:
+                r.status = "done"
+
+                r.done_at = (
+                    time.perf_counter() - start
+                )
+
+                assert cache.release_request(rid), (
+                    f"Rank0 missing released request {rid}"
+                )
+
+                completed.append(rid)
+
+            else:
+                r.status = "ready"
+
+        if completed:
+            release_seq = seq()
+
+            sent_releases.add(release_seq)
+
+            network.release(
+                release_seq,
+                completed,
+            )
+
+    elapsed = time.perf_counter() - start
+
+    assert not cache._committed
+    assert not sent_releases
+
+    assert all(
+        len(r.tokens) == output_len
+        for r in requests
+    )
+
+    assert all(
+        r.rid in release_acks
+        for r in requests
+    )
+
+    snapshot = cache.snapshot()
+
+    if "active_requests" in snapshot:
+        assert snapshot["active_requests"] == 0
+
+    total = num_requests * output_len
+
+    avg_ttft_ms = (
+        sum(
+            r.first_token_at - r.admitted_at
+            for r in requests
+        )
+        / num_requests
+        * 1000
+    )
+
+    print(
+        f"D_PROFILE label={label} "
+        f"stage0_gpu_s={stage0_gpu_s:.4f} "
+        f"transport_send_s="
+        f"{network.send_time_s - send_start_s:.4f} "
+        f"transport_response_s="
+        f"{network.response_time_s - response_start_s:.4f} "
+        f"rank0_result_wait_s={result_wait_s:.4f} "
+        f"wall_s={elapsed:.4f}",
+        flush=True,
+    )
+
+    print(
+        f"D_CASE label={label} "
+        f"requests={num_requests} "
+        f"input={input_len} "
+        f"output={output_len} "
+        f"batch_limit={batch_size} "
+        f"staggered={int(staggered)} "
+        f"wall_s={elapsed:.4f} "
+        f"aggregate_tps={total / elapsed:.4f} "
+        f"avg_ttft_ms={avg_ttft_ms:.2f} "
+        f"stats={counts} "
+        f"shapes={batch_shapes[:12]}",
+        flush=True,
+    )
+
+    print(
+        f"D_OUTPUT_FIRST label={label} "
+        f"tokens={[r.tokens[0] for r in requests]}",
+        flush=True,
+    )
+
+    if batch_size > 1:
+        assert any(
+            size > 1
+            for _, size in batch_shapes
+        ), "No genuine GPU microbatch executed"
+
+    if staggered:
+        assert any(
+            r.arrival_s > 0
+            for r in requests
+        )
+
+    if (
+        os.getenv("D_STAGE0_DIAG", "0") == "1"
+        and label in ("measured_b2", "measured_b4")
+    ):
+        expected_count = (
+            num_requests * output_len
+        )
+
+        assert (
+            stage0_numeric_count == expected_count
+        ), (
+            f"Stage0 comparison incomplete: "
+            f"{stage0_numeric_count} "
+            f"vs {expected_count}"
+        )
+
+        print(
+            f"D_STAGE0_SUMMARY "
+            f"batch={batch_size} "
+            f"vectors={stage0_numeric_count} "
+            f"max_relative_l2="
+            f"{stage0_numeric_max_rel:.8f} "
+            f"worst_slot_position="
+            f"{stage0_numeric_worst}",
+            flush=True,
+        )
+
+    if (
+        os.getenv("D_STAGE0_REPLAY", "0") == "1"
+        and label in (
+            "measured_b1",
+            "measured_b2",
+            "measured_b4",
+        )
+    ):
+        expected_entries = (
+            num_requests * output_len
+        )
+
+        assert (
+            len(D_STAGE0_REPLAY) == expected_entries
+        ), (
+            f"Incomplete stage-0 replay reference: "
+            f"{len(D_STAGE0_REPLAY)} "
+            f"vs {expected_entries}"
+        )
+
+        print(
+            f"D_REPLAY_SUMMARY "
+            f"label={label} "
+            f"reference_vectors="
+            f"{len(D_STAGE0_REPLAY)} "
+            f"enabled=1",
+            flush=True,
+        )
+
+    return (
+        elapsed,
+        total / elapsed,
+        tuple(
+            tuple(r.tokens)
+            for r in requests
+        ),
+    )
+
+
+
+def check_stage0_incremental_reference(
+    stage, cache, outputs, input_len
+):
+    """GPU test: cached decode vs full-prefix prefill.
+
+    Uses the fourth request from B1 and the
+    exact tokens it generated.
+    """
+
+    assert not cache._committed
+
+    slot = 3
+
+    prompt = prompts(
+        4,
+        input_len,
+        stage.config.vocab_size,
+    )[slot]
+
+    tokens = tuple(outputs[slot])
+
+    positions_to_check = {
+        128, 144, 150, 160, 176, 180, 190
+    }
+
+    incremental_id = 9_100_000_001
+    reference_id = 9_100_000_002
+
+    assert max(positions_to_check) < (
+        input_len + len(tokens)
+    )
+
+    print(
+        "D_SELFREF_START "
+        f"prompt={input_len} "
+        f"tokens={len(tokens)}",
+        flush=True,
+    )
+
+    with torch.inference_mode():
+        try:
+            # Path A: normal prefill then cached decoding.
+            stage_forward(
+                stage,
+                cache,
+                PREFILL,
+                (incremental_id,),
+                (0,),
+                (prompt,),
+            )
+
+            for step, token in enumerate(tokens):
+                position = input_len + step
+
+                incremental = stage_forward(
+                    stage,
+                    cache,
+                    DECODE,
+                    (incremental_id,),
+                    (position,),
+                    (int(token),),
+                )
+
+                if position not in positions_to_check:
+                    continue
+
+                # Path B: independent full-prefix
+                # recomputation with fresh cache state.
+                prefix = (
+                    prompt + tokens[:step + 1]
+                )
+
+                full = stage_forward(
+                    stage,
+                    cache,
+                    PREFILL,
+                    (reference_id,),
+                    (0,),
+                    (prefix,),
+                )
+
+                a = (
+                    incremental[0, -1, :]
+                    .detach()
+                    .float()
+                )
+
+                b = (
+                    full[0, -1, :]
+                    .detach()
+                    .float()
+                )
+
+                assert a.shape == b.shape
+                assert torch.isfinite(a).all()
+                assert torch.isfinite(b).all()
+
+                diff = a - b
+
+                rel_l2 = float((
+                    torch.linalg.vector_norm(diff)
+                    / torch.linalg.vector_norm(
+                        b
+                    ).clamp_min(1e-12)
+                ).item())
+
+                max_abs = float(
+                    diff.abs().max().item()
+                )
+
+                print(
+                    "D_SELFREF_RESULT "
+                    f"position={position} "
+                    f"relative_l2={rel_l2:.8f} "
+                    f"max_abs={max_abs:.6f}",
+                    flush=True,
+                )
+
+                assert cache.release_request(
+                    reference_id
+                )
+
+        finally:
+            if reference_id in cache._committed:
+                cache.release_request(reference_id)
+
+            if incremental_id in cache._committed:
+                cache.release_request(incremental_id)
+
+    assert not cache._committed
+
+    print(
+        "D_SELFREF_COMPLETE "
+        f"cache={cache.snapshot()}",
+        flush=True,
+    )
+
+
+def run_rank0(stage, cache):
+    network = Network()
+
+    counter = [0]
+
+    input_len = int(
+        os.getenv("V32_PROMPT_TOKENS", "128")
+    )
+
+    output_len = int(
+        os.getenv("V32_NEW_TOKENS", "64")
+    )
+
+    sizes = tuple(
+        int(n)
+        for n in os.getenv(
+            "D_BATCH_SIZES",
+            "1,2,4",
+        ).split(",")
+    )
+
+    try:
+        reference_outputs = None
+        parity_ok = True
+
+        for size in sizes:
+            # Warm-up, excluded from measured throughput.
+            run_case(
+                stage,
+                cache,
+                network,
+                counter,
+                label=f"warmup_b{size}",
+                num_requests=4,
+                input_len=input_len,
+                output_len=output_len,
+                batch_size=size,
+                staggered=False,
+            )
+
+            # Same workload, measured after warm-up.
+            _, _, output = run_case(
+                stage,
+                cache,
+                network,
+                counter,
+                label=f"measured_b{size}",
+                num_requests=4,
+                input_len=input_len,
+                output_len=output_len,
+                batch_size=size,
+                staggered=False,
+                force_tokens=(
+                    reference_outputs
+                    if (
+                        size > 1
+                        and os.getenv(
+                            "D_NUMERIC_CHECK", "0"
+                        ) == "1"
+                    )
+                    else None
+                ),
+            )
+
+            if reference_outputs is None:
+                reference_outputs = output
+
+                if os.getenv(
+                    "D_STAGE0_SELFREF", "0"
+                ) == "1":
+                    check_stage0_incremental_reference(
+                        stage,
+                        cache,
+                        reference_outputs,
+                        input_len,
+                    )
+
+                if size == 1:
+                    first = tuple(
+                        tokens[0]
+                        for tokens in output
+                    )
+
+                    assert first == (
+                        225,
+                        207,
+                        236,
+                        257,
+                    ), (
+                        "Unexpected first tokens "
+                        f"versus A+B baseline: {first}"
+                    )
+
+            else:
+                mismatches = sum(
+                    a != b
+                    for row_a, row_b in zip(
+                        reference_outputs,
+                        output,
+                    )
+                    for a, b in zip(
+                        row_a,
+                        row_b,
+                    )
+                )
+
+                print(
+                    f"D_GREEDY_PARITY size={size} "
+                    f"mismatched_tokens={mismatches}",
+                    flush=True,
+                )
+
+                if mismatches:
+                    parity_ok = False
+
+                for i, (reference, actual) in enumerate(
+                    zip(reference_outputs, output)
+                ):
+                    differences = [
+                        j for j, (a, b) in enumerate(
+                            zip(reference, actual)
+                        )
+                        if a != b
+                    ]
+
+                    if differences:
+                        first = differences[0]
+                        left = max(0, first - 2)
+                        right = min(len(reference), first + 6)
+
+                        print(
+                            f"D_PARITY_DETAIL batch={size} "
+                            f"request={i} "
+                            f"first_diff={first} "
+                            f"mismatches={len(differences)} "
+                            f"reference={reference[left:right]} "
+                            f"actual={actual[left:right]}",
+                            flush=True,
+                        )
+
+        if os.getenv("D_PROFILE_ONLY", "0") == "1":
+            print(
+                "D_B1_PROFILE_COMPLETE",
+                flush=True,
+            )
+            return
+
+        # Admit new requests while inference is underway.
+        _, _, staggered_output = run_case(
+            stage,
+            cache,
+            network,
+            counter,
+            label="staggered_b2",
+            num_requests=8,
+            input_len=input_len,
+            output_len=output_len,
+            batch_size=2,
+            staggered=True,
+        )
+
+        if reference_outputs is not None:
+            staggered_mismatches = sum(
+                a != b
+                for expected, actual in zip(
+                    reference_outputs,
+                    staggered_output[:4],
+                )
+                for a, b in zip(expected, actual)
+            )
+
+            print(
+                f"D_STAGGERED_PARITY "
+                f"mismatched_tokens={staggered_mismatches}",
+                flush=True,
+            )
+
+        print(
+            "D_AUTOREGRESSIVE_TOKEN_PARITY "
+            f"exact_match={int(parity_ok)} "
+            "(batch-dependent differences logged)",
+            flush=True,
+        )
+
+        print(
+            "PASS: Phase D operational checks: "
+            "shared KV, dynamic admission, "
+            "batched feedback and cleanup; "
+            "full-logit numerical parity not yet verified",
+            flush=True,
+        )
+
+    finally:
+        network.stop()
+
+
+def main():
+    # Install fast SDPA without modifying the original
+    # V3.2 attention or stage implementation.
+    import llm_runtime.v3_2_qwen3_stage_batch as decoder
+
+    from llm_runtime.v3_2_block_attention_fast import (
+        block_decode_attention_fast,
+    )
+
+    decoder.block_decode_attention = (
+        block_decode_attention_fast
+    )
+
+    rank = int(os.environ["RANK"])
+
+    assert rank in (0, 1)
+    assert int(os.environ["WORLD_SIZE"]) == 2
+
+    torch.cuda.set_device(0)
+    torch.set_num_threads(1)
+
+    dist.init_process_group(
+        backend="nccl",
+        init_method="env://",
+        timeout=timedelta(seconds=600),
+    )
+
+    try:
+        stage = Qwen3NRankStageOnlyFactory(
+            checkpoint_dir="/models/qwen3-14b",
+            layer_boundaries=(0, 20, 40),
+            device="cuda:0",
+            dtype="bfloat16",
+        )(rank)
+
+        cache = new_cache(
+            stage,
+            int(os.getenv("D_MAX_ACTIVE", "8")),
+            int(os.getenv("V32_PROMPT_TOKENS", "128")),
+            int(os.getenv("V32_NEW_TOKENS", "64")),
+        )
+
+        torch.cuda.synchronize()
+
+        print(
+            f"D_READY rank={rank} "
+            f"model_gib="
+            f"{torch.cuda.memory_allocated() / 2**30:.3f} "
+            f"shared_cache={cache.snapshot()}",
+            flush=True,
+        )
+
+        dist.barrier(device_ids=[0])
+
+        if rank == 0:
+            run_rank0(stage, cache)
+
+        else:
+            run_rank1(stage, cache)
+
+    finally:
+        dist.destroy_process_group()
+
+
+if __name__ == "__main__":
+    main()
