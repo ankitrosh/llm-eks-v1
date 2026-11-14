@@ -557,3 +557,143 @@ verification before deployment.
 The tool never creates resources or requests quotas.
 The configuration is not yet a supported input to
 the Kubernetes deployment renderer.
+
+## 16. Discover GPU resources and model storage
+
+The following commands are read-only. They do not
+create AWS resources, change EKS node groups, or
+deploy Kubernetes workloads.
+
+### Discover GPU node groups and regional quota
+
+```bash
+python3 scripts/v3_5_aws_enrich.py \
+  --config .llm-eks/deployment.yaml \
+  --output .llm-eks/deployment.discovered.yaml
+```
+
+The selected instance type must match an available
+managed node group.
+
+If no matching group is found, verify the configured
+instance type against your cluster's node groups.
+Do not assume a quota increase is necessary.
+
+### Discover existing model PVCs
+
+```bash
+python3 scripts/v3_5_aws_storage.py \
+  --config .llm-eks/deployment.discovered.yaml \
+  --output .llm-eks/deployment.storage.yaml
+```
+
+For Qwen3-14B, automatic storage discovery checks
+the reference PVC names.
+
+Other models require explicit PVC selection using
+--pvc-rank0 and --pvc-rank1.
+
+PVC discovery checks that the selected volumes are
+distinct and Bound.
+
+It does not inspect model files or guarantee that
+EBS volumes can mount on the intended GPU nodes.
+
+### Run the environment doctor
+
+```bash
+python3 scripts/v3_5_aws_doctor.py \
+  --config .llm-eks/deployment.storage.yaml \
+  --check-k8s
+```
+
+Doctor findings use PASS, WARN and FAIL.
+
+A result with zero FAIL findings does not mean
+that all deployment prerequisites are verified.
+Review warnings and unverified checks before deployment.
+
+Current checks include:
+
+- Configured AWS target and runtime topology
+- Safe deployment replica count
+- Managed GPU group and node selector
+- Regional GPU quota limit
+- Node-group maximum and desired capacity
+- Kubernetes namespace accessibility
+- Ready nodes advertising NVIDIA GPU resources
+- Model PVC existence and Bound status
+
+The doctor does not currently verify checkpoint
+contents, unused quota, GPU allocation by other
+Pods, EBS volume AZ placement, or live inference.
+
+All generated local configurations are stored
+under .llm-eks/ and excluded from Git.
+
+## 17. Render the discovered deployment configuration
+
+The V3.5 renderer generates an isolated Kubernetes
+manifest bundle using previously discovered settings.
+
+Current supported reference:
+- Qwen3-14B BF16
+- vLLM backend
+- Pipeline parallelism 2
+- Tensor parallelism 1
+- Two g5.xlarge On-Demand GPU workers
+- Separate CPU coordinator and recovery deployments
+
+The CPU node group must currently be provided explicitly.
+
+Example:
+
+```bash
+python3 scripts/v3_5_render_discovered.py \
+  --config .llm-eks/deployment.storage.yaml \
+  --cpu-nodegroup cpu-system \
+  --output-dir test-results/v35-discovered-reference
+```
+
+Replace cpu-system with your actual managed CPU
+node-group name.
+
+The output directory must not already exist.
+
+The renderer produces 14 JSON resources with v35-
+resource names, including:
+
+- GPU deployments and services
+- CPU coordinator and recovery
+- Model metadata and embedded source
+- Recovery state, service account and RBAC
+
+Namespace-specific service addresses, execution-plan
+references, resource names and node selectors are
+updated consistently.
+
+All deployments have zero replicas.
+
+Recovery remains paused and automatic recovery
+remains disabled.
+
+The renderer does not communicate with Kubernetes,
+create resources, download checkpoints or start GPUs.
+
+Generated files under test-results/ are Git-ignored.
+
+IMPORTANT: The renderer currently relies on stored
+discovery results. It does not independently refresh
+AWS quotas, Kubernetes storage state or instance
+availability.
+
+Before deployment, inspect the generated manifests
+and confirm the CPU node group, GPU node group,
+model checkpoint contents, storage placement and
+runtime readiness.
+
+This renderer intentionally supports the validated
+Qwen3-14B reference configuration only.
+
+Other model architectures and model replacement
+workflows require their own verified execution plans.
