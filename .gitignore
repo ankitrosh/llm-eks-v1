@@ -65,3 +65,11 @@ checkpoints/
 # Environment-specific maintenance state
 tests/maintenance-storage-baseline.json
 /working/
+
+# Python package builds
+*.egg-info/
+build/
+dist/
+
+# Local AWS deployment configuration
+/.llm-eks/

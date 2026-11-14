@@ -1,0 +1,12 @@
+schema_version: 1
+
+model:
+  id: Example/CustomModel
+
+runtime:
+  backend: sample-runtime
+
+plugins:
+  modules:
+    - examples.v3_5_cli.sample_backend
+  selected_backend: sample-backend

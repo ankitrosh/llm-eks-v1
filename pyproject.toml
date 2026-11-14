@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-eks-runtime"
+version = "0.3.5.dev0"
+description = "Extensible distributed LLM inference framework with Kubernetes deployment support"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+config = [
+    "PyYAML>=6.0,<7.0",
+]
+
+[project.scripts]
+llm-eks = "llm_runtime.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = false
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["llm_runtime", "llm_runtime.*"]
+namespaces = true
