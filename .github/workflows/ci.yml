@@ -1,0 +1,126 @@
+name: Framework CI
+
+on:
+  push:
+    branches:
+      - main
+      - v3.5-public-release
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-validation:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install framework
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip check
+
+      - name: Verify package imports
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          from llm_runtime.extensions import PluginRegistry
+          from llm_runtime.inspection.registry import ModelInspectorRegistry
+          from llm_runtime.backends.external_adapter import ExternalBackendAdapter
+
+          assert version("llm-eks-runtime") == "0.3.5.dev0"
+          assert PluginRegistry
+          assert ModelInspectorRegistry
+          assert ExternalBackendAdapter
+
+          print("CI_PACKAGE_IMPORT_PASS")
+          PY
+
+      - name: Run V3.3 regressions
+        run: |
+          python -m unittest discover \
+            -s tests -p 'test_v3_3_*.py' -q
+
+      - name: Run V3.4 regressions
+        run: |
+          python -m unittest discover \
+            -s tests -p 'test_v3_4*.py' -q
+
+      - name: Run V3.5 regressions
+        run: |
+          python -m unittest discover \
+            -s tests -p 'test_v3_5*.py' -q
+
+      - name: Validate external backend integration
+        run: |
+          python scripts/v3_4_1_test_custom_backend.py
+
+      - name: Verify reproducible default manifests
+        run: |
+          python scripts/v3_3_generate_k8s.py
+          python scripts/v3_5_verify_default.py
+
+          git diff --exit-code -- \
+            deploy/v3_3 \
+            infrastructure/profiles/v3-3/qwen3-14b
+
+      - name: Build distributable wheel
+        run: |
+          python -m pip wheel \
+            --no-deps \
+            --wheel-dir dist \
+            .
+
+      - name: Verify independent wheel installation
+        shell: bash
+        run: |
+          python -m venv /tmp/v35-wheel-venv
+
+          /tmp/v35-wheel-venv/bin/python -m pip install \
+            --no-deps dist/*.whl
+
+          (
+            cd /tmp
+
+            env -u PYTHONPATH \
+              /tmp/v35-wheel-venv/bin/python - <<'PY'
+          from pathlib import Path
+          from importlib.metadata import version
+          import sys
+          import llm_runtime
+
+          location = Path(llm_runtime.__file__).resolve()
+          environment = Path(sys.prefix).resolve()
+
+          assert environment in location.parents
+          assert version("llm-eks-runtime") == "0.3.5.dev0"
+
+          print("CI_STANDALONE_WHEEL_PASS")
+          PY
+          )
+
+      - name: Verify clean tracked source
+        run: |
+          git diff --exit-code
+          git diff --check
+          echo "V35_CI_CPU_ACCEPTANCE_PASS"
