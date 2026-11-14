@@ -84,13 +84,8 @@ Clone the repository and install the framework:
 ```bash
 git clone https://github.com/ankitrosh/llm-eks-v1.git
 cd llm-eks-v1
-git checkout v3.5-public-release
-
 python3 -m pip install -e '.[config]'
 ```
-
-Until the release branch is merged into the default
-branch, check out `v3.5-public-release` before installation.
 
 To generate and validate the default Kubernetes manifests:
 
@@ -216,7 +211,7 @@ python3 -m unittest discover \
 ```
 
 The V3.3, V3.4, and V3.5 regression groups currently
-contain 75 passing CPU tests.
+contain 142 passing CPU regression tests.
 
 GPU tests are separate and require compatible hardware,
 model checkpoint files, and distributed infrastructure.
@@ -264,9 +259,12 @@ Historical development files remain available under
 
 ## License
 
-A license has not yet been selected for the public release.
-Until a license is added, no open-source license permissions
-are granted by this repository.
+This framework is released under the
+[Apache License 2.0](LICENSE).
+
+Third-party dependencies, inference engines, models,
+and container images retain their own licenses.
+See [Third-Party Notices](THIRD_PARTY_NOTICES.md).
 
 ## AWS setup and GPU quotas
 
@@ -281,5 +279,5 @@ at `examples/aws/deployment.example.yaml`.
 
 Read-only AWS account, region and EKS cluster discovery
 is available through `scripts/v3_5_aws_configure.py`.
-GPU node, quota, storage and deployment validation remain
-planned.
+GPU node, quota, storage and deployment diagnostics are
+available through the V3.5 CLI and reference utilities.
