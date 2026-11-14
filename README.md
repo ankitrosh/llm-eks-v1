@@ -1,85 +1,28 @@
-# Distributed LLM Inference Framework
+# LLM-EKS
 
-An extensible framework for distributed LLM inference,
-with Kubernetes deployment tooling, model-aware planning,
-runtime customization, and recovery coordination.
+LLM-EKS is an open-source framework for running and customizing distributed LLM inference on Kubernetes. It helps users inspect supported models, prepare execution plans, generate deployment resources, and manage a distributed serving setup.
 
-The framework supports explicit model inspection, validated
-execution plans, interchangeable runtime components, and
-user-defined extensions.
+The working reference uses **Qwen3-14B, vLLM, and two NVIDIA A10G GPUs on AWS EKS**, with pipeline parallelism across the GPUs. It is a validated reference setup, not a production-certified service or a universal model loader.
 
-The current reference implementation uses vLLM with
-pipeline parallelism across two GPU workers.
+## Three ways to use it
 
-## Project status
+**1. Use the reference setup.** Keep the validated Qwen3-14B configuration and generate the Kubernetes resources. See [Default workflow](examples/basic/README.md).
 
-**V3.5 — Public release preparation**
+**2. Change the model.** For a compatible BF16 Qwen3 checkpoint, inspect its metadata, generate a new plan, and render a separate GPU-worker bundle. This path does not yet create new storage or a complete coordinator and recovery stack. See [Model swap](examples/model_swap/README.md).
 
-Validated reference configuration:
+**3. Fully customize.** Register a custom model inspector, backend, scheduler policy, or supported resource override through the extension interfaces. Your implementation must meet its own runtime and deployment requirements. See [Custom extensions](examples/custom_extensions/README.md).
 
-- Model: Qwen3-14B
-- Hardware: two NVIDIA A10G GPUs
-- Platform: AWS EKS
-- Backend: vLLM
-- Pipeline parallelism: 2
-- Tensor parallelism: 1
-- Communication: NCCL
-- Precision: BF16
+## Reference architecture
 
-The reference configuration has successfully performed
-real distributed GPU inference.
+Two GPU workers run vLLM with PP=2 and TP=1. A CPU gateway checks serving readiness and forwards requests to rank 0. The CPU recovery controller watches worker health and manages recovery state.
 
-Qwen3-8B has additionally been validated for offline
-checkpoint inspection, distributed planning, and isolated
-Kubernetes manifest generation.
+Both CPU components existed in the original V1 project and were adapted for vLLM in V3.3.
 
-The project is currently a research/framework release,
-not a production-certified serving platform.
+See the [architecture diagram](docs/ARCHITECTURE.md) and [repository map](docs/REPOSITORY_MAP.md).
 
-## Key capabilities
-
-### Model-aware execution planning
-
-- Architecture-specific checkpoint inspection
-- Verified checkpoint-index layout metadata
-- Runtime and model capability validation
-- Two-node distributed vLLM execution planning
-- Explicit rejection of incompatible configurations
-
-### Extensible inference architecture
-
-- Strategy-based behavior selection
-- Plugin registry and factory construction
-- Backend adapter contracts
-- External model inspector registration
-- User-defined scheduling policies
-- CPU/memory/GPU resource validation
-
-### Distributed Kubernetes serving
-
-- Two-worker pipeline-parallel deployment
-- GPU worker and CPU coordinator components
-- Gateway readiness and health checks
-- Recovery controller with durable state
-- Deployment manifests generated offline
-- Safe default: zero deployment replicas
-
-### Runtime customization
-
-- External execution backend adapters
-- Custom model inspection
-- Scheduling parameter customization
-- Kubernetes resource overrides
-- Native vLLM scheduler class replacement
-
-Native vLLM scheduler replacement was validated with
-real GPU inference using the pinned reference runtime.
-
-## Quick start
+## Start with the offline workflow
 
 Requires Python 3.10+.
-
-Clone the repository and install the framework:
 
 ```bash
 git clone https://github.com/ankitrosh/llm-eks-v1.git
@@ -216,46 +159,26 @@ contain 142 passing CPU regression tests.
 GPU tests are separate and require compatible hardware,
 model checkpoint files, and distributed infrastructure.
 
-## Deployment safety
+`llm-eks` also provides `configure`, `plan`, `render`, `doctor`, and opt-in `test`. See the [CLI guide](docs/CLI_GUIDE.md).
 
-Generated Kubernetes manifests are not automatically
-applied to a cluster.
+## Documentation
 
-Reference worker and coordinator deployments start
-with zero replicas.
+- [Architecture and three user journeys](docs/ARCHITECTURE.md)
+- [Repository map](docs/REPOSITORY_MAP.md)
+- [Project journey and results](docs/PROJECT_JOURNEY.md)
+- [Design decisions and current limits](docs/ARCHITECTURE_COMPATIBILITY_REVIEW.md)
+- [What each test file checks](docs/TEST_GUIDE.md)
+- [Benchmark procedure](docs/BENCHMARK.md)
 
-Before launching GPU inference, provision and verify
-the necessary cluster, networking, model storage,
-GPU scheduling, and security requirements.
+## Limits and next steps
 
-Deployment resources and storage may incur cloud costs.
+The reference deployment is fixed to a validated two-node Qwen3-14B configuration. Model swaps are restricted to supported Qwen3 layouts.
 
-Do not assume that offline model planning guarantees
-GPU memory compatibility or successful live inference.
+Custom backends are not automatically deployable. The runtime adapter and CLI planning interfaces are separate. The earlier custom attention and KV-cache implementations are not native vLLM replacements.
 
-## Current limitations
+Future work will focus on **Mixture-of-Experts (MoE) inference and observability**.
 
-- Arbitrary model architectures are not automatically supported.
-- The public model-swap deployment renderer currently
-  targets compatible non-quantized BF16 Qwen3 models.
-- Alternative-model bundles do not yet include a dedicated
-  coordinator/recovery deployment or storage provisioning.
-- Native vLLM KV-cache replacement is not integrated.
-- Research-runtime attention customization is not equivalent
-  to native vLLM attention-kernel replacement.
-- Custom vLLM scheduler classes use version-sensitive
-  upstream internals.
-- Production security, durability, and sustained-load
-  readiness have not been certified.
-
-## Development history
-
-The project evolved through custom multi-GPU execution,
-distributed communication, scheduling and caching
-research, and later integration with vLLM.
-
-Historical development files remain available under
-`research/archive/` and through Git history.
+See [V3.4 validation](docs/V3_4_FREEZE_2026-11-13.md) for established capabilities and limits.
 
 ## License
 
