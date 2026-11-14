@@ -28,11 +28,136 @@ Requires Python 3.10+.
 git clone https://github.com/ankitrosh/llm-eks-v1.git
 cd llm-eks-v1
 python3 -m pip install -e '.[config]'
+```
+
+To generate and validate the default Kubernetes manifests:
+
+```bash
 python3 scripts/v3_3_generate_k8s.py
 python3 scripts/v3_5_verify_default.py
 ```
 
-This generates and checks reference manifests. It **does not start GPU nodes, deploy pods, or run inference**. The generated workloads default to zero replicas.
+Expected validation marker:
+
+    V35_DEFAULT_WORKFLOW_PASS
+
+This operation is CPU-only. It does not deploy anything
+or allocate GPU resources.
+
+## Public CLI
+
+The installed `llm-eks` command supports five operations:
+
+| Command | Purpose |
+|---|---|
+| `llm-eks configure` | Local configuration and optional AWS discovery |
+| `llm-eks plan` | Backend-specific execution planning |
+| `llm-eks render` | Offline artifact generation |
+| `llm-eks doctor` | Optional environment and compatibility diagnostics |
+| `llm-eks test` | Explicitly selected tests only |
+
+Example reference workflow:
+
+```bash
+llm-eks configure --aws
+llm-eks plan
+llm-eks render
+```
+
+Custom backends use the framework extension registry,
+with `--allow-custom-code` required to import trusted
+external Python modules.
+
+Framework regression tests run in development/CI,
+not automatically in end-user commands. The custom
+backend sample demonstrates extensibility, not
+inference correctness.
+
+See the [CLI Guide](docs/CLI_GUIDE.md) for full
+usage, plugin examples and limitations.
+
+## Three usage workflows
+
+### 1. Default distributed inference
+
+Use the validated Qwen3-14B reference configuration
+to generate deployment manifests.
+
+Guide: [Default workflow](examples/basic/README.md)
+
+### 2. Replace the model configuration
+
+Inspect compatible Qwen3 checkpoint metadata, validate
+distributed execution parameters, and render an isolated
+GPU-worker Kubernetes bundle.
+
+Qwen3-8B has been tested through this offline process.
+
+Guide: [Model replacement](examples/model_swap/README.md)
+
+### 3. Customize framework behavior
+
+Provide custom Python implementations for supported
+extension contracts.
+
+Examples cover:
+
+- Scheduling policies and resource configuration
+- External architecture inspection
+- Custom inference backend integration
+- Native vLLM scheduler replacement
+
+Guide: [Full customization](examples/custom_extensions/README.md)
+
+## Architecture
+
+The framework uses three complementary patterns:
+
+**Strategy:** Select interchangeable implementation behavior.
+
+**Registry / Factory:** Explicitly register, validate,
+and construct compatible extensions.
+
+**Adapter:** Present consistent framework-facing
+interfaces around externally supplied backends.
+
+See the V3.4 freeze report for validated capabilities:
+
+[Technical validation and limitations](docs/V3_4_FREEZE_2026-11-13.md)
+
+## Repository organization
+
+| Directory | Purpose |
+|---|---|
+| `src/llm_runtime/` | Framework runtime and extension contracts |
+| `scripts/` | Supported utilities and validation tools |
+| `examples/` | User workflows and extension examples |
+| `deploy/` | Kubernetes manifests and templates |
+| `infrastructure/` | Infrastructure profiles and historical configurations |
+| `tests/` | Regression and contract tests |
+| `docs/` | Architecture, validation, and operational notes |
+| `research/archive/` | Historical experiments and development backups |
+
+## Run CPU regression tests
+
+From the repository root:
+
+```bash
+python3 -m unittest discover \
+  -s tests -p 'test_v3_3_*.py'
+
+python3 -m unittest discover \
+  -s tests -p 'test_v3_4*.py'
+
+python3 -m unittest discover \
+  -s tests -p 'test_v3_5*.py'
+```
+
+The V3.3, V3.4, and V3.5 regression groups currently
+contain 142 passing CPU regression tests.
+
+GPU tests are separate and require compatible hardware,
+model checkpoint files, and distributed infrastructure.
 
 `llm-eks` also provides `configure`, `plan`, `render`, `doctor`, and opt-in `test`. See the [CLI guide](docs/CLI_GUIDE.md).
 
@@ -57,4 +182,25 @@ See [V3.4 validation](docs/V3_4_FREEZE_2026-11-13.md) for established capabiliti
 
 ## License
 
-Apache-2.0. External models, inference engines, and container images keep their own licenses. See [third-party notices](THIRD_PARTY_NOTICES.md).
+This framework is released under the
+[Apache License 2.0](LICENSE).
+
+Third-party dependencies, inference engines, models,
+and container images retain their own licenses.
+See [Third-Party Notices](THIRD_PARTY_NOTICES.md).
+
+## AWS setup and GPU quotas
+
+For instructions on configuring an AWS account, locating
+EKS clusters and GPU resources, and requesting additional
+EC2 GPU vCPU quota, see:
+
+[AWS Setup and GPU Quota Guide](docs/AWS_SETUP_AND_GPU_QUOTAS.md)
+
+A proposed deployment configuration template is available
+at `examples/aws/deployment.example.yaml`.
+
+Read-only AWS account, region and EKS cluster discovery
+is available through `scripts/v3_5_aws_configure.py`.
+GPU node, quota, storage and deployment diagnostics are
+available through the V3.5 CLI and reference utilities.
