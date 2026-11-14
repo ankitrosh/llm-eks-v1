@@ -1,0 +1,11 @@
+llm-eks-runtime
+Copyright 2026 llm-eks-runtime contributors
+
+This project is licensed under the Apache License,
+Version 2.0. See the LICENSE file.
+
+Third-party frameworks, runtime images, model weights,
+and other dependencies retain their respective
+copyrights and licenses.
+
+See THIRD_PARTY_NOTICES.md for integration references.
