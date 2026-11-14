@@ -67,11 +67,15 @@ jobs:
             -s tests -p 'test_v3_4*.py' -q
 
       - name: Run V3.5 regressions
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python -m unittest discover \
             -s tests -p 'test_v3_5*.py' -q
 
       - name: Validate external backend integration
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python scripts/v3_4_1_test_custom_backend.py
 
