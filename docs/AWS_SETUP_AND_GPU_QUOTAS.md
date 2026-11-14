@@ -14,9 +14,10 @@ It covers:
 
 No AWS resources are created by the discovery commands.
 
-The repository does not currently implement automatic
-AWS configuration discovery. The configuration template
-described below is a proposed deployment interface.
+The repository includes read-only AWS account, region
+and EKS cluster discovery. Full configuration validation,
+GPU quota checks and deployment rendering are separate
+follow-up capabilities.
 
 ## 1. Prerequisites
 
@@ -515,3 +516,44 @@ https://docs.aws.amazon.com/eks/latest/userguide/device-management-nvidia.html
 
 EBS CSI storage:
 https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html
+
+## 15. Generate a local configuration automatically
+
+Install the configuration dependency:
+
+```bash
+python3 -m pip install -e '.[config]'
+```
+
+From the repository root, run:
+
+```bash
+python3 scripts/v3_5_aws_configure.py \
+  --template examples/aws/deployment.example.yaml \
+  --output .llm-eks/deployment.yaml
+```
+
+Override the selected region if necessary:
+
+```bash
+python3 scripts/v3_5_aws_configure.py \
+  --region us-east-2 \
+  --cluster your-eks-cluster
+```
+
+These are read-only AWS discovery operations.
+
+The output is created with restrictive file permissions
+and its directory is excluded from Git.
+
+The tool currently discovers account ID, region and
+EKS cluster identity. When multiple clusters exist,
+it does not select one without an explicit choice.
+
+GPU node-group configuration, PVCs, available GPU
+vCPU quotas and Kubernetes access still require
+verification before deployment.
+
+The tool never creates resources or requests quotas.
+The configuration is not yet a supported input to
+the Kubernetes deployment renderer.

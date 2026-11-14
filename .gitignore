@@ -70,3 +70,6 @@ tests/maintenance-storage-baseline.json
 *.egg-info/
 build/
 dist/
+
+# Local AWS deployment configuration
+/.llm-eks/

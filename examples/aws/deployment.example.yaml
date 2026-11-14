@@ -1,5 +1,6 @@
 # V3.5 AWS deployment configuration — proposed schema.
-# This file is a template, not yet consumed by the CLI.
+# Used by scripts/v3_5_aws_configure.py for discovery.
+# Full deployment rendering from this schema is pending.
 # Copy into a Git-ignored local configuration when supported.
 
 schema_version: 1

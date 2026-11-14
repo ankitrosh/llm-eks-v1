@@ -247,5 +247,7 @@ EC2 GPU vCPU quota, see:
 A proposed deployment configuration template is available
 at `examples/aws/deployment.example.yaml`.
 
-Automatic AWS configuration discovery is planned but
-not yet implemented.
+Read-only AWS account, region and EKS cluster discovery
+is available through `scripts/v3_5_aws_configure.py`.
+GPU node, quota, storage and deployment validation remain
+planned.
