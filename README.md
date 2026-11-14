@@ -84,6 +84,7 @@ Clone the repository and install the framework:
 ```bash
 git clone https://github.com/ankitrosh/llm-eks-v1.git
 cd llm-eks-v1
+git checkout v3.5-public-release
 
 python3 -m pip install -e .
 ```
@@ -234,3 +235,17 @@ Historical development files remain available under
 A license has not yet been selected for the public release.
 Until a license is added, no open-source license permissions
 are granted by this repository.
+
+## AWS setup and GPU quotas
+
+For instructions on configuring an AWS account, locating
+EKS clusters and GPU resources, and requesting additional
+EC2 GPU vCPU quota, see:
+
+[AWS Setup and GPU Quota Guide](docs/AWS_SETUP_AND_GPU_QUOTAS.md)
+
+A proposed deployment configuration template is available
+at `examples/aws/deployment.example.yaml`.
+
+Automatic AWS configuration discovery is planned but
+not yet implemented.

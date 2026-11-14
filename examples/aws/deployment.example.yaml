@@ -1,0 +1,41 @@
+# V3.5 AWS deployment configuration — proposed schema.
+# This file is a template, not yet consumed by the CLI.
+# Copy into a Git-ignored local configuration when supported.
+
+schema_version: 1
+
+aws:
+  region: auto
+  account_id: auto
+  cluster_name: null
+  namespace: llm
+
+model:
+  id: Qwen/Qwen3-14B
+  checkpoint_path: /models/qwen3-14b
+  pvc_rank0: null
+  pvc_rank1: null
+
+runtime:
+  backend: vllm
+  pipeline_parallelism: 2
+  tensor_parallelism: 1
+  dtype: bfloat16
+  gpu_memory_utilization: 0.85
+
+deployment:
+  gpu_instance_type: g5.2xlarge
+  capacity_type: ON_DEMAND
+  gpu_node_selector:
+    pool: gpu
+  replicas: 0
+  auto_recovery: false
+
+# Future configuration tool should discover:
+# - AWS identity and region
+# - Available EKS clusters and node groups
+# - Instance-family vCPU quotas
+# - Kubernetes namespace, labels and PVCs
+#
+# It must never discover or submit a quota increase
+# without explicit user approval.
