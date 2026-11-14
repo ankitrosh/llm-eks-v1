@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "backend": "vllm",
+  "modules": [
+    "examples.v3_4_1.custom_scheduler"
+  ],
+  "selected_scheduler": "user-capacity-policy",
+  "runtime_image": null,
+  "resources": {
+    "requests": {
+      "cpu": "2500m",
+      "memory": "9Gi"
+    },
+    "limits": {
+      "memory": "14Gi"
+    }
+  }
+}
