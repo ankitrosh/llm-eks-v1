@@ -1,0 +1,12 @@
+{
+  "apiVersion": "v1",
+  "kind": "ConfigMap",
+  "metadata": {
+    "name": "v341-user-scheduler",
+    "namespace": "llm"
+  },
+  "data": {
+    "__init__.py": "",
+    "scheduler.py": "\"\"\"User-defined scheduler loaded by the real vLLM engine.\"\"\"\n\nimport logging\n\nfrom vllm.v1.core.sched.scheduler import Scheduler\n\n\nlogger = logging.getLogger(__name__)\n\n\nclass UserScheduler(Scheduler):\n    \"\"\"First demonstration of a custom scheduling class.\"\"\"\n\n    def __init__(self, *args, **kwargs):\n        logger.warning(\n            \"V341_USER_SCHEDULER_INSTANTIATED\"\n        )\n        super().__init__(*args, **kwargs)\n"
+  }
+}

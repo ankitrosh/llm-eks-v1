@@ -14,10 +14,15 @@ from llm_runtime.extensions.external import (
 from llm_runtime.extensions.vllm_policy import (
     apply_vllm_policy,
 )
+from llm_runtime.extensions.k8s_resources import (
+    apply_resource_overrides,
+)
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 4) or (
+        len(sys.argv) == 4 and sys.argv[2] != "--output-dir"
+    ):
         raise SystemExit(
             "Usage: python scripts/v3_4_1_render_extensions.py "
             "extensions.json"
@@ -31,6 +36,7 @@ def main():
         "modules",
         "selected_scheduler",
         "runtime_image",
+        "resources",
     }
 
     if set(config) - allowed:
@@ -82,14 +88,20 @@ def main():
             (source / filename).read_text()
         )
 
-        outputs[filename] = apply_vllm_policy(
+        selected = apply_vllm_policy(
             deployment,
             policy,
             runtime_image=config.get("runtime_image"),
         )
+        if "resources" in config:
+            selected = apply_resource_overrides(
+                selected, config["resources"]
+            )
+        outputs[filename] = selected
 
     destination = Path(
-        "deploy/v3_4_1/rendered"
+        sys.argv[3] if len(sys.argv) == 4
+        else "deploy/v3_4_1/rendered"
     )
     destination.mkdir(parents=True, exist_ok=True)
 

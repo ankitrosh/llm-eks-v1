@@ -1,0 +1,191 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "v33-vllm-rank0",
+    "namespace": "llm"
+  },
+  "spec": {
+    "replicas": 0,
+    "strategy": {
+      "type": "Recreate"
+    },
+    "selector": {
+      "matchLabels": {
+        "app": "v33-vllm",
+        "rank": "0"
+      }
+    },
+    "template": {
+      "metadata": {
+        "labels": {
+          "app": "v33-vllm",
+          "rank": "0"
+        }
+      },
+      "spec": {
+        "nodeSelector": {
+          "pool": "gpu"
+        },
+        "containers": [
+          {
+            "name": "vllm",
+            "image": "vllm/vllm-openai@sha256:befccf0e7e4089aa23926bb6f887a85c0d46c2a99e6de5c5ffdf5cb7957c5b34",
+            "imagePullPolicy": "IfNotPresent",
+            "command": [
+              "vllm",
+              "serve",
+              "/models/qwen3-14b",
+              "--distributed-executor-backend",
+              "mp",
+              "--tensor-parallel-size",
+              "1",
+              "--pipeline-parallel-size",
+              "2",
+              "--nnodes",
+              "2",
+              "--node-rank",
+              "0",
+              "--master-addr",
+              "v33-vllm-rank0.llm.svc.cluster.local",
+              "--master-port",
+              "29501",
+              "--dtype",
+              "bfloat16",
+              "--max-model-len",
+              "2048",
+              "--host",
+              "0.0.0.0",
+              "--port",
+              "8000",
+              "--gpu-memory-utilization",
+              "0.85",
+              "--distributed-timeout-seconds",
+              "900",
+              "--enforce-eager",
+              "--max-num-seqs",
+              "2",
+              "--max-num-batched-tokens",
+              "384",
+              "--scheduling-policy",
+              "fcfs",
+              "--scheduler-cls",
+              "user_vllm_ext.scheduler.UserScheduler"
+            ],
+            "env": [
+              {
+                "name": "NCCL_IB_DISABLE",
+                "value": "1"
+              },
+              {
+                "name": "NCCL_SOCKET_IFNAME",
+                "value": "eth0"
+              },
+              {
+                "name": "GLOO_SOCKET_IFNAME",
+                "value": "eth0"
+              },
+              {
+                "name": "VLLM_HOST_IP",
+                "valueFrom": {
+                  "fieldRef": {
+                    "fieldPath": "status.podIP"
+                  }
+                }
+              },
+              {
+                "name": "PYTHONPATH",
+                "value": "/opt/v341"
+              }
+            ],
+            "resources": {
+              "requests": {
+                "cpu": "2",
+                "memory": "8Gi",
+                "nvidia.com/gpu": "1"
+              },
+              "limits": {
+                "memory": "14Gi",
+                "nvidia.com/gpu": "1"
+              }
+            },
+            "volumeMounts": [
+              {
+                "name": "model",
+                "mountPath": "/models",
+                "readOnly": true
+              },
+              {
+                "name": "dshm",
+                "mountPath": "/dev/shm"
+              },
+              {
+                "name": "v341-scheduler",
+                "mountPath": "/opt/v341",
+                "readOnly": true
+              }
+            ],
+            "ports": [
+              {
+                "name": "api",
+                "containerPort": 8000
+              },
+              {
+                "name": "master",
+                "containerPort": 29501
+              }
+            ],
+            "startupProbe": {
+              "httpGet": {
+                "path": "/health",
+                "port": 8000
+              },
+              "periodSeconds": 10,
+              "failureThreshold": 120
+            },
+            "readinessProbe": {
+              "httpGet": {
+                "path": "/health",
+                "port": 8000
+              },
+              "periodSeconds": 5,
+              "failureThreshold": 3
+            }
+          }
+        ],
+        "terminationGracePeriodSeconds": 30,
+        "volumes": [
+          {
+            "name": "model",
+            "persistentVolumeClaim": {
+              "claimName": "model-files-qwen3-0"
+            }
+          },
+          {
+            "name": "dshm",
+            "emptyDir": {
+              "medium": "Memory",
+              "sizeLimit": "1Gi"
+            }
+          },
+          {
+            "name": "v341-scheduler",
+            "configMap": {
+              "name": "v341-user-scheduler",
+              "items": [
+                {
+                  "key": "__init__.py",
+                  "path": "user_vllm_ext/__init__.py"
+                },
+                {
+                  "key": "scheduler.py",
+                  "path": "user_vllm_ext/scheduler.py"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}
