@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "backend": "vllm",
+  "expected_model_id": "Qwen/Qwen3-14B",
+  "model_capabilities_path": "infrastructure/profiles/v3-3/qwen3-14b/model_capabilities.json",
+  "model_layout_path": "infrastructure/profiles/v3-3/qwen3-14b/model_layout.json",
+  "deployment": {
+    "model_path": "/models/qwen3-14b",
+    "nnodes": 2,
+    "gpus_per_node": 1,
+    "pp": 2,
+    "tp": 1,
+    "master_addr": "v33-vllm-rank0.llm.svc.cluster.local",
+    "master_port": 29501,
+    "max_model_len": 2048,
+    "dtype": "bfloat16",
+    "port": 8000
+  }
+}
