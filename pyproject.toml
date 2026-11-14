@@ -14,6 +14,9 @@ config = [
     "PyYAML>=6.0,<7.0",
 ]
 
+[project.scripts]
+llm-eks = "llm_runtime.cli:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = false

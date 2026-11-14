@@ -56,6 +56,11 @@ jobs:
           print("CI_PACKAGE_IMPORT_PASS")
           PY
 
+      - name: Verify public CLI
+        run: |
+          llm-eks --help
+          llm-eks test
+
       - name: Run V3.3 regressions
         run: |
           python -m unittest discover \
@@ -122,6 +127,16 @@ jobs:
           print("CI_STANDALONE_WHEEL_PASS")
           PY
           )
+
+      - name: Verify standalone wheel CLI
+        shell: bash
+        run: |
+          (
+            cd /tmp
+            env -u PYTHONPATH \
+              /tmp/v35-wheel-venv/bin/llm-eks --help
+          )
+          echo "CI_STANDALONE_CLI_PASS"
 
       - name: Verify clean tracked source
         run: |

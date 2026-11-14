@@ -86,7 +86,7 @@ git clone https://github.com/ankitrosh/llm-eks-v1.git
 cd llm-eks-v1
 git checkout v3.5-public-release
 
-python3 -m pip install -e .
+python3 -m pip install -e '.[config]'
 ```
 
 Until the release branch is merged into the default
@@ -105,6 +105,38 @@ Expected validation marker:
 
 This operation is CPU-only. It does not deploy anything
 or allocate GPU resources.
+
+## Public CLI
+
+The installed `llm-eks` command supports five operations:
+
+| Command | Purpose |
+|---|---|
+| `llm-eks configure` | Local configuration and optional AWS discovery |
+| `llm-eks plan` | Backend-specific execution planning |
+| `llm-eks render` | Offline artifact generation |
+| `llm-eks doctor` | Optional environment and compatibility diagnostics |
+| `llm-eks test` | Explicitly selected tests only |
+
+Example reference workflow:
+
+```bash
+llm-eks configure --aws
+llm-eks plan
+llm-eks render
+```
+
+Custom backends use the framework extension registry,
+with `--allow-custom-code` required to import trusted
+external Python modules.
+
+Framework regression tests run in development/CI,
+not automatically in end-user commands. The custom
+backend sample demonstrates extensibility, not
+inference correctness.
+
+See the [CLI Guide](docs/CLI_GUIDE.md) for full
+usage, plugin examples and limitations.
 
 ## Three usage workflows
 
