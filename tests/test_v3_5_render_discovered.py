@@ -60,6 +60,71 @@ class TestDiscoveredRenderer(unittest.TestCase):
             },
         }
 
+    def test_auto_discovered_cpu_nodegroup(self):
+        self.config["deployment"].update({
+            "cpu_nodegroup": "cpu-workers",
+            "cpu_node_selector": {
+                "eks.amazonaws.com/nodegroup": "cpu-workers"
+            },
+        })
+
+        docs = build(self.config)
+
+        for name in (
+            "cpu-coordinator.json",
+            "cpu-recovery.json",
+        ):
+            spec = docs[name]["spec"]["template"]["spec"]
+
+            self.assertEqual(
+                spec["nodeSelector"],
+                {
+                    "eks.amazonaws.com/nodegroup":
+                        "cpu-workers"
+                },
+            )
+
+    def test_explicit_cpu_group_matches_discovery(self):
+        self.config["deployment"].update({
+            "cpu_nodegroup": "cpu-system",
+            "cpu_node_selector": {
+                "eks.amazonaws.com/nodegroup": "cpu-system"
+            },
+        })
+
+        docs = build(self.config, "cpu-system")
+        self.assertEqual(len(docs), 14)
+
+    def test_conflicting_cpu_override_rejected(self):
+        self.config["deployment"].update({
+            "cpu_nodegroup": "cpu-system",
+            "cpu_node_selector": {
+                "eks.amazonaws.com/nodegroup": "cpu-system"
+            },
+        })
+
+        with self.assertRaisesRegex(
+            ValueError, "conflicts"
+        ):
+            build(self.config, "different-cpu-group")
+
+    def test_invalid_discovered_cpu_selector_rejected(self):
+        self.config["deployment"].update({
+            "cpu_nodegroup": "cpu-system",
+            "cpu_node_selector": {"pool": "gpu"},
+        })
+
+        with self.assertRaisesRegex(
+            ValueError, "selector mismatch"
+        ):
+            build(self.config)
+
+    def test_missing_cpu_discovery_requires_override(self):
+        with self.assertRaisesRegex(
+            ValueError, "not discovered"
+        ):
+            build(self.config)
+
     def render(self):
         return build(self.config, "cpu-system")
 

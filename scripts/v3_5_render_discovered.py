@@ -37,6 +37,56 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def resolve_cpu_nodegroup(config, override=None):
+    """Use verified discovery, with explicit legacy fallback."""
+    deployment = (
+        config.get("deployment")
+        if isinstance(config, dict)
+        else None
+    )
+
+    require(
+        isinstance(deployment, dict),
+        "Missing deployment configuration",
+    )
+
+    discovered = deployment.get("cpu_nodegroup")
+    selector = deployment.get("cpu_node_selector")
+
+    if discovered is not None:
+        require(
+            isinstance(discovered, str) and bool(discovered),
+            "Invalid discovered CPU node group",
+        )
+
+        require(
+            selector == {
+                "eks.amazonaws.com/nodegroup": discovered
+            },
+            "Discovered CPU selector mismatch",
+        )
+
+        require(
+            override is None or override == discovered,
+            "CPU node-group override conflicts with discovery",
+        )
+
+        return discovered
+
+    require(
+        selector is None,
+        "CPU selector configured without node-group identity",
+    )
+
+    require(
+        override is not None,
+        "CPU node group not discovered; "
+        "provide --cpu-nodegroup",
+    )
+
+    return override
+
+
 def validate(config, cpu_nodegroup):
     require(
         isinstance(config, dict)
@@ -229,8 +279,11 @@ def transform_strings(value, namespace):
     return value
 
 
-def build(config, cpu_nodegroup):
+def build(config, cpu_nodegroup=None):
     """Produce 14 new documents entirely in memory."""
+    cpu_nodegroup = resolve_cpu_nodegroup(
+        config, cpu_nodegroup
+    )
     namespace = validate(config, cpu_nodegroup)
 
     paths = list(SOURCE.glob("*.json"))
@@ -440,7 +493,7 @@ def main():
         "--config", required=True, type=Path
     )
     parser.add_argument(
-        "--cpu-nodegroup", required=True
+        "--cpu-nodegroup"
     )
     parser.add_argument(
         "--output-dir", required=True, type=Path
